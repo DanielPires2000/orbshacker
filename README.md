@@ -12,7 +12,6 @@ A professional tool that automatically creates fake game processes for Discord O
 
 Voici la section en anglais, prête à coller dans votre README :
 
-```markdown
 ## Fix for Marathon & Toxic Commando
 
 These two games cannot be detected through the normal database search. To complete their quests, use **Manual Mode** (option 2 from the menu) and enter the following custom paths:
@@ -23,7 +22,6 @@ These two games cannot be detected through the normal database search. To comple
 Before launching the tool, start the download on Steam, wait for it to reach 1-2%, then pause it. The fake process will be created under `Desktop/Win64/` with the full path, and Discord should detect it normally.
 
 Other games (Where Winds Meet, Grounded 2, Once Human, Opera GX) still work through the normal database search without this workaround.
-```
 
 ## Features
 
@@ -225,6 +223,7 @@ This project is licensed under the GNU General Public License v3.0 (GPL-3.0). Se
 **Strykey**
 
 *"Because sometimes you just need those orbs without the commitment of a 100GB download."*
+
 
 
 
