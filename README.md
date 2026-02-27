@@ -10,7 +10,7 @@ A professional tool that automatically creates fake game processes for Discord O
 
 <img width="485" height="426" alt="Capture d'écran 2026-01-16 204625" src="https://github.com/user-attachments/assets/07cbdd26-b248-4bd0-8092-61a54c80d2ed" />
 
-## 🚨 BIG NEWS — Steam Quest Mode
+## 🚨 BIG NEWS !! Steam Quest Mode 🚨
 
 A major new feature has been added: **Steam Quest Mode**.
 
@@ -237,6 +237,7 @@ This project is licensed under the GNU General Public License v3.0 (GPL-3.0). Se
 **Strykey**
 
 *"Because sometimes you just need those orbs without the commitment of a 100GB download."*
+
 
 
 
