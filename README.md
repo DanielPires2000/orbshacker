@@ -14,13 +14,13 @@ A professional tool that automatically creates fake game processes for Discord O
 
 A major new feature has been added: **Steam Quest Mode**.
 
-Some games (like Marathon or Toxic Commando) use a more advanced detection method — Discord doesn't just check the process name and folder, it also verifies that Steam has actually registered the game as downloading. Without this, the standard spoofing methods simply don't work.
+Some games (like Marathon or Toxic Commando) use a more advanced detection method, Discord doesn't just check the process name and folder, it also verifies that Steam has actually registered the game as downloading. Without this, the standard spoofing methods simply don't work.
 
 **Steam Quest Mode bypasses this entirely**, with no download required.
 
 ### How it works
 
-1. You search for the game by name directly inside the tool — no need to go to SteamDB or look up AppIDs manually
+1. You search for the game by name directly inside the tool, no need to go to SteamDB or look up AppIDs manually
 2. The tool fetches the game's metadata from the SteamCMD public API (install directory, executable path, depot info)
 3. It retrieves your Steam ID automatically from the Windows registry
 4. It generates a fake `appmanifest_<appid>.acf` file in your `steamapps/` folder — this is the exact file Steam creates when a download is in progress, with realistic values (`StateFlags 1026`, `LastOwner`, `StagedDepots`, etc.)
@@ -30,7 +30,7 @@ Some games (like Marathon or Toxic Commando) use a more advanced detection metho
 ### What's supported
 
 - ✅ Works for any game that requires a Steam manifest to be detected
-- ✅ Fully automatic — no manual AppID lookup needed
+- ✅ Fully automatic, no manual AppID lookup needed
 - ✅ Your real Steam ID is used so the manifest looks legitimate
 - ✅ Searches demos and full games separately (important — quests often target the Demo version)
 - ✅ Cleans up after itself once you're done
@@ -237,6 +237,7 @@ This project is licensed under the GNU General Public License v3.0 (GPL-3.0). Se
 **Strykey**
 
 *"Because sometimes you just need those orbs without the commitment of a 100GB download."*
+
 
 
 
