@@ -10,6 +10,21 @@ A professional tool that automatically creates fake game processes for Discord O
 
 <img width="485" height="426" alt="Capture d'écran 2026-01-16 204625" src="https://github.com/user-attachments/assets/07cbdd26-b248-4bd0-8092-61a54c80d2ed" />
 
+Voici la section en anglais, prête à coller dans votre README :
+
+```markdown
+## Fix for Marathon & Toxic Commando
+
+These two games cannot be detected through the normal database search. To complete their quests, use **Manual Mode** (option 2 from the menu) and enter the following custom paths:
+
+- Marathon: `Marathon Server Slam/Marathon.exe`
+- Toxic Commando: `John Carpenter's Toxic Commando Demo/John Carpenter's Toxic Commando.exe`
+
+Before launching the tool, start the download on Steam, wait for it to reach 1-2%, then pause it. The fake process will be created under `Desktop/Win64/` with the full path, and Discord should detect it normally.
+
+Other games (Where Winds Meet, Grounded 2, Once Human, Opera GX) still work through the normal database search without this workaround.
+```
+
 ## Features
 
 - **Automatic Game Detection**: Connects to Discord's official API to fetch the latest list of detectable games
@@ -210,6 +225,7 @@ This project is licensed under the GNU General Public License v3.0 (GPL-3.0). Se
 **Strykey**
 
 *"Because sometimes you just need those orbs without the commitment of a 100GB download."*
+
 
 
 
