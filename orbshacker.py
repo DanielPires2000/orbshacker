@@ -18,6 +18,10 @@ import requests
 import subprocess
 import time
 from pathlib import Path
+import tempfile
+import zipfile
+import hashlib
+from datetime import datetime, timezone
 
 
 class Colors:
@@ -569,8 +573,131 @@ def database_mode(db, faker):
     input(f"\n{Colors.GRAY}Press Enter to continue...{Colors.RESET}")
 
 
+def auto_update_from_github(repo_url, dry_run=False):
+    """Download repo ZIP from GitHub, compare files and update local files if different.
+
+    - Only adds/updates files (will not delete local files).
+    - Makes backups into `.backups/<timestamp>/...` before overwriting.
+    - Silently continues on network errors.
+    """
+    # small UX: show checking animation
+    try:
+        loading_animation("Checking for updates", 1.2)
+    except Exception:
+        pass
+
+    try:
+        base_dir = Path(__file__).resolve().parent
+    except Exception:
+        return []
+
+    def _download_repo_zip(url):
+        resp = requests.get(url, stream=True, timeout=20)
+        resp.raise_for_status()
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+        with open(tmp.name, 'wb') as fh:
+            for chunk in resp.iter_content(1024 * 8):
+                if chunk:
+                    fh.write(chunk)
+        return tmp.name
+
+    def _extract_zip_to_temp(zip_path):
+        td = tempfile.mkdtemp()
+        with zipfile.ZipFile(zip_path, 'r') as z:
+            z.extractall(td)
+        return Path(td)
+
+    def _sha256(path):
+        h = hashlib.sha256()
+        with open(path, 'rb') as fh:
+            for chunk in iter(lambda: fh.read(8192), b''):
+                h.update(chunk)
+        return h.hexdigest()
+
+    def _sync_dirs(src_dir, dst_dir, dry_run=False):
+        updated = []
+        timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        backup_base = dst_dir / '.backups' / timestamp
+
+        for src in src_dir.rglob('*'):
+            if src.is_dir():
+                continue
+            rel = src.relative_to(src_dir)
+            # skip git metadata
+            if any(part.startswith('.git') for part in rel.parts):
+                continue
+
+            dst = dst_dir / rel
+            if dst.exists():
+                try:
+                    if _sha256(src) == _sha256(dst):
+                        continue
+                except Exception:
+                    pass
+
+                # backup
+                backup_target = backup_base / rel
+                backup_target.parent.mkdir(parents=True, exist_ok=True)
+                if not dry_run:
+                    shutil.copy2(dst, backup_target)
+
+                # copy new file
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                if not dry_run:
+                    shutil.copy2(src, dst)
+                updated.append(str(rel))
+            else:
+                # new file
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                if not dry_run:
+                    shutil.copy2(src, dst)
+                updated.append(str(rel))
+
+        return updated
+
+    # try main then master
+    branches = ['main', 'master']
+    for branch in branches:
+        try:
+            zip_url = f"{repo_url.rstrip('/')}/archive/refs/heads/{branch}.zip"
+            zip_path = _download_repo_zip(zip_url)
+            extracted = _extract_zip_to_temp(zip_path)
+
+            # the archive typically contains a single top-level folder
+            entries = [p for p in extracted.iterdir() if p.is_dir()]
+            repo_root = entries[0] if entries else extracted
+
+            updated_files = _sync_dirs(repo_root, base_dir, dry_run=dry_run)
+
+            if updated_files:
+                print_color(f"[UPDATE] Applied {len(updated_files)} updated/new files", Colors.GREEN)
+            else:
+                print_color("[UPDATE] No changes detected", Colors.CYAN)
+
+            try:
+                os.unlink(zip_path)
+            except Exception:
+                pass
+
+            return updated_files
+
+        except Exception:
+            # try next branch
+            continue
+
+    return []
+
+
 def main():
     """Main application loop"""
+    # Attempt auto-update from GitHub before starting the interactive UI
+    try:
+        repo_url = "https://github.com/strykey/orbshacker"
+        auto_update_from_github(repo_url, dry_run=False)
+    except Exception:
+        # Don't break startup for update failures; proceed normally
+        pass
+
     print_banner()
     
     print_color("Initializing Discord Orb Quest Faker...", Colors.CYAN)
