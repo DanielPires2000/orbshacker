@@ -23,7 +23,7 @@ Some games (like Marathon or Toxic Commando) use a more advanced detection metho
 1. You search for the game by name directly inside the tool, no need to go to SteamDB or look up AppIDs manually
 2. The tool fetches the game's metadata from the SteamCMD public API (install directory, executable path, depot info)
 3. It retrieves your Steam ID automatically from the Windows registry
-4. It generates a fake `appmanifest_<appid>.acf` file in your `steamapps/` folder — this is the exact file Steam creates when a download is in progress, with realistic values (`StateFlags 1026`, `LastOwner`, `StagedDepots`, etc.)
+4. It generates a fake `appmanifest_<appid>.acf` file in your `steamapps/` folder : this is the exact file Steam creates when a download is in progress, with realistic values (`StateFlags 1026`, `LastOwner`, `StagedDepots`, etc.)
 5. It places the fake executable directly in `steamapps/common/<game>/`
 6. Discord scans your steamapps folder, finds the manifest, sees the process running, and validates the quest
 
