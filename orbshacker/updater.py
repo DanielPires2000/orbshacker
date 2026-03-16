@@ -1,0 +1,156 @@
+"""
+updater.py – Auto-update from GitHub Releases.
+
+Only runs when the app is a compiled executable (sys.frozen).
+Compares the current VERSION against the latest GitHub Release tag.
+If a newer version exists, downloads the .exe asset and replaces itself.
+"""
+
+import os
+import sys
+import tempfile
+import requests
+from pathlib import Path
+from packaging.version import Version, InvalidVersion
+
+from . import config
+from .ui import Colors, print_color, loading_animation
+
+
+def is_frozen() -> bool:
+    """Return True if running as a compiled executable (e.g. PyInstaller)."""
+    return getattr(sys, 'frozen', False)
+
+
+def _parse_version(tag: str) -> Version:
+    """Parse a version tag like 'v2.1.0' or '2.1.0' into a Version object."""
+    return Version(tag.lstrip('v'))
+
+
+def _get_latest_release() -> dict | None:
+    """Fetch the latest release info from the GitHub API.
+    Returns dict with 'tag_name' and 'assets' or None on failure.
+    """
+    url = f"https://api.github.com/repos/{config.GITHUB_REPO_OWNER}/{config.GITHUB_REPO_NAME}/releases/latest"
+    try:
+        resp = requests.get(url, timeout=config.REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        return None
+
+
+def _find_exe_asset(assets: list) -> dict | None:
+    """Find the .exe download asset from a release."""
+    for asset in assets:
+        name = asset.get('name', '')
+        if name.lower().endswith('.exe'):
+            return asset
+    return None
+
+
+def _download_file(url: str, dest: Path) -> None:
+    """Download a file from url to dest path."""
+    resp = requests.get(url, stream=True, timeout=config.REQUEST_TIMEOUT_LONG)
+    resp.raise_for_status()
+    with open(dest, 'wb') as f:
+        for chunk in resp.iter_content(8192):
+            if chunk:
+                f.write(chunk)
+
+
+def _replace_exe(new_exe: Path) -> None:
+    """Replace the currently running .exe with the new one.
+    
+    On Windows we can't overwrite a running file, so we:
+    1. Rename current exe to .old
+    2. Move new exe into place
+    3. Launch new exe
+    4. Exit current process
+    """
+    current_exe = Path(sys.executable)
+    old_exe = current_exe.with_suffix('.old')
+
+    # Clean up any previous .old file
+    if old_exe.exists():
+        try:
+            os.remove(old_exe)
+        except Exception:
+            pass
+
+    try:
+        os.rename(current_exe, old_exe)
+        new_exe.rename(current_exe)
+        print_color(f"[UPDATE] Updated to new version!", Colors.GREEN, bold=True)
+        print_color("[UPDATE] Restarting...", Colors.CYAN)
+
+        # Launch the new exe and exit
+        os.startfile(str(current_exe))
+        sys.exit(0)
+    except Exception as e:
+        # Try to restore original
+        if old_exe.exists() and not current_exe.exists():
+            os.rename(old_exe, current_exe)
+        print_color(f"[UPDATE] Failed to apply update: {e}", Colors.RED)
+
+
+def auto_update() -> None:
+    """Check for updates and auto-update if a new release is available.
+    
+    Only runs when the app is a compiled executable. 
+    Skips silently when running from source.
+    """
+    if not is_frozen():
+        return  # Running from source – skip update entirely
+
+    try:
+        loading_animation("Checking for updates", 1.2)
+    except Exception:
+        pass
+
+    # 1. Fetch latest release
+    release = _get_latest_release()
+    if not release:
+        return
+
+    # 2. Compare versions
+    tag = release.get('tag_name', '')
+    try:
+        remote_version = _parse_version(tag)
+        local_version = _parse_version(config.VERSION)
+    except InvalidVersion:
+        return
+
+    if remote_version <= local_version:
+        print_color(f"[UPDATE] You're up to date (v{config.VERSION})", Colors.CYAN)
+        return
+
+    # 3. Find exe download
+    asset = _find_exe_asset(release.get('assets', []))
+    if not asset:
+        print_color(f"[UPDATE] v{tag} available but no .exe found in release", Colors.YELLOW)
+        print_color(f"[UPDATE] Download manually: {config.REPO_URL}/releases/latest", Colors.GRAY)
+        return
+
+    # 4. Download + replace
+    print_color(f"[UPDATE] New version available: {config.VERSION} → {tag}", Colors.GREEN, bold=True)
+    try:
+        loading_animation(f"Downloading {asset['name']}", 2.0)
+        tmp = Path(tempfile.mktemp(suffix='.exe'))
+        _download_file(asset['browser_download_url'], tmp)
+        _replace_exe(tmp)
+    except Exception as e:
+        print_color(f"[UPDATE] Download failed: {e}", Colors.YELLOW)
+        print_color(f"[UPDATE] Download manually: {config.REPO_URL}/releases/latest", Colors.GRAY)
+
+
+# ── Kept for tests (pure functions) ───────────────────────────────────────────
+
+def _sha256(path: Path) -> str:
+    """Return the SHA-256 hex digest of a file."""
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, 'rb') as fh:
+        for chunk in iter(lambda: fh.read(8192), b''):
+            h.update(chunk)
+    return h.hexdigest()

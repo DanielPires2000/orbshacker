@@ -1,0 +1,52 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on tags like v2.1.0, v3.0.0, etc.
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable
+        run: |
+          pyinstaller --onefile --name orbshacker --noconsole --add-data "settings.py;." --collect-all orbshacker orbshacker.py
+
+      - name: Get tag name
+        id: tag
+        shell: bash
+        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.TAG_NAME }}
+          name: Orbshacker ${{ steps.tag.outputs.TAG_NAME }}
+          body: |
+            ## Orbshacker ${{ steps.tag.outputs.TAG_NAME }}
+            
+            ### Download
+            Download `orbshacker.exe` below and run it. No Python required!
+            
+            ### What's new
+            See the [commit log](https://github.com/${{ github.repository }}/commits/${{ steps.tag.outputs.TAG_NAME }}) for details.
+          files: dist/orbshacker.exe
+          draft: false
+          prerelease: false
