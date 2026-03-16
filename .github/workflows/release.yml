@@ -27,7 +27,7 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onefile --name orbshacker --noconsole --add-data "settings.py;." --collect-all orbshacker orbshacker.py
+          pyinstaller --onefile --name orbshacker --console --add-data "settings.py;." --collect-all orbshacker orbshacker.py
 
       - name: Get tag name
         id: tag

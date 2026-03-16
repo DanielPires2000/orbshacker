@@ -11,6 +11,17 @@ it runs the 15-minute timer instead of the main menu.
 """
 
 import sys
+import os
+
+# ── Safety: redirect stdio to devnull when running without a console ──────────
+# PyInstaller --noconsole (or pythonw) sets sys.stdout/stderr/stdin to None.
+# Redirect to devnull so print() / input() don't crash the whole app.
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+if sys.stdin is None:
+    sys.stdin = open(os.devnull, "r")
 
 if "--timer-mode" in sys.argv:
     from orbshacker.timer import run_timer
