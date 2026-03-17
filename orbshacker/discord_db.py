@@ -2,10 +2,11 @@
 discord_db.py – DiscordGamesDB class and database search mode.
 """
 
-import sys
+from typing import TypedDict
 import time
 
 from . import config
+from .faker import GameFaker
 from .ui import (
     Colors, print_color, print_boxed_title,
     loading_animation, ask_confirm,
@@ -14,11 +15,23 @@ from .net import fetch_json
 from .errors import NetworkError, DatabaseLoadError
 
 
+class ExecutableEntry(TypedDict, total=False):
+    os: str
+    name: str
+
+
+class GameRecord(TypedDict, total=False):
+    id: str
+    name: str
+    aliases: list[str]
+    executables: list[ExecutableEntry]
+
+
 class DiscordGamesDB:
     """Loads and searches the Discord-detectable games database."""
 
     def __init__(self):
-        self.games: list = []
+        self.games: list[GameRecord] = []
         self.source: str | None = None
         self._load()
 
@@ -55,19 +68,21 @@ class DiscordGamesDB:
             print_color(f"[ERROR] GitHub backup failed: {e}", Colors.RED)
             return False
 
-    def search_games(self, query: str) -> list:
+    def search_games(self, query: str) -> list[GameRecord]:
         """Search for games by name or alias, returning up to MAX_SEARCH_RESULTS matches."""
         query_lower = query.lower()
-        exact: dict = {}
-        partial: dict = {}
+        exact: dict[str, GameRecord] = {}
+        partial: dict[str, GameRecord] = {}
         for game in self.games:
-            game_id = game.get('id')
+            game_id = game.get('id', '')
             name = game.get('name', '').lower()
             aliases = [a.lower() for a in game.get('aliases', [])]
             if query_lower == name or query_lower in aliases:
-                exact.setdefault(game_id, game)
+                if game_id:
+                    exact.setdefault(game_id, game)
             elif query_lower in name or any(query_lower in a for a in aliases):
-                partial.setdefault(game_id, game)
+                if game_id:
+                    partial.setdefault(game_id, game)
         merged = list(exact.values()) + [g for g in partial.values() if g.get('id') not in exact]
         return merged[:config.MAX_SEARCH_RESULTS]
 
@@ -77,8 +92,9 @@ class DiscordGamesDB:
         'crash', 'report', 'update', 'setup', 'install',
     ]
 
-    def _filter_win32_exes(self, game: dict, skip_patterns: bool = True) -> list:
-        result, seen = [], set()
+    def _filter_win32_exes(self, game: GameRecord, skip_patterns: bool = True) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
         for exe in game.get('executables', []):
             if exe.get('os') != 'win32':
                 continue
@@ -94,17 +110,17 @@ class DiscordGamesDB:
             result.append(name)
         return result
 
-    def get_win32_executable(self, game: dict) -> str | None:
+    def get_win32_executable(self, game: GameRecord) -> str | None:
         candidates = self._filter_win32_exes(game, skip_patterns=True)
         return candidates[0] if candidates else None
 
-    def get_all_executables(self, game: dict) -> list:
+    def get_all_executables(self, game: GameRecord) -> list[str]:
         return self._filter_win32_exes(game, skip_patterns=False)
 
 
 # ── Interactive UI ────────────────────────────────────────────────────────────
 
-def _pick_discord_game(db: DiscordGamesDB, query: str) -> dict | None:
+def _pick_discord_game(db: DiscordGamesDB, query: str) -> GameRecord | None:
     """Search the Discord DB and let the user choose a game."""
     loading_animation(f"Searching for '{query}'", 0.8)
     matches = db.search_games(query)
@@ -145,7 +161,7 @@ def _pick_discord_game(db: DiscordGamesDB, query: str) -> dict | None:
     return matches[idx - 1]
 
 
-def _resolve_discord_exe(db: DiscordGamesDB, game: dict) -> str | None:
+def _resolve_discord_exe(db: DiscordGamesDB, game: GameRecord) -> str | None:
     """Return the primary exe, prompting the user if none found."""
     exe_name = db.get_win32_executable(game)
     if exe_name:
@@ -162,7 +178,7 @@ def _resolve_discord_exe(db: DiscordGamesDB, game: dict) -> str | None:
     return None
 
 
-def database_mode(db: DiscordGamesDB, faker) -> None:
+def database_mode(db: DiscordGamesDB, faker: GameFaker) -> None:
     """Database search mode."""
     print_boxed_title("DATABASE SEARCH", width=50, color=Colors.CYAN)
     print_color(f"[*] Database: {db.source}", Colors.CYAN)

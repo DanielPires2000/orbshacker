@@ -5,15 +5,38 @@ steam.py – Steam quest helpers: registry, API, appmanifest, and quest mode UI.
 import os
 import sys
 import time
+from typing import Any, TypedDict, cast
 from pathlib import Path
 
 from . import config
+from .faker import GameFaker
 from .ui import (
     Colors, print_color, print_boxed_title,
     loading_animation, ask_confirm,
 )
 from .net import fetch_json
-from .errors import NetworkError, SteamNotFoundError
+from .errors import NetworkError
+
+
+class SteamAppInfo(TypedDict):
+    name: str
+    installdir: str
+    executable: str
+    depot_id: str | None
+
+
+class SteamStoreItem(TypedDict):
+    id: int
+    name: str
+
+
+class SteamLaunchEntry(TypedDict, total=False):
+    executable: str
+    config: dict[str, str]
+
+
+SteamLaunchMap = dict[str, SteamLaunchEntry]
+SteamDataMap = dict[str, Any]
 
 # Windows registry – optional
 try:
@@ -54,7 +77,7 @@ def get_steam_user_id() -> str:
 
 # ── API helpers ───────────────────────────────────────────────────────────────
 
-def _pick_windows_exe(launch: dict) -> str | None:
+def _pick_windows_exe(launch: SteamLaunchMap) -> str | None:
     """Return the first Windows .exe found in a SteamCMD launch dict."""
     for key in sorted(launch.keys()):
         entry = launch[key]
@@ -66,29 +89,28 @@ def _pick_windows_exe(launch: dict) -> str | None:
     return None
 
 
-def fetch_steam_app_info(appid: int) -> dict | None:
+def fetch_steam_app_info(appid: int) -> SteamAppInfo | None:
     """Fetch app info from SteamCMD API. Returns dict or None on failure."""
     url = f"{config.STEAMCMD_API_URL}/{appid}"
     try:
         loading_animation(f"Fetching Steam app info for {appid}", 1.2)
-        data = fetch_json(url)
+        data = cast(SteamDataMap, fetch_json(url))
 
-        app_data   = data.get("data", {}).get(str(appid), {})
-        common_cfg = app_data.get("common", {})
-        app_cfg    = app_data.get("config", {})
+        data_root = cast(dict[str, SteamDataMap], data.get("data", {}))
+        app_data = data_root.get(str(appid), {})
+        common_cfg = cast(dict[str, str], app_data.get("common", {}))
+        app_cfg = cast(dict[str, Any], app_data.get("config", {}))
 
-        name       = common_cfg.get("name", f"App {appid}")
-        installdir = app_cfg.get("installdir", name)
-        executable = _pick_windows_exe(app_cfg.get("launch", {}))
+        name = common_cfg.get("name", f"App {appid}")
+        installdir = str(app_cfg.get("installdir", name))
+        launch_map = cast(SteamLaunchMap, app_cfg.get("launch", {}))
+        executable = _pick_windows_exe(launch_map)
 
         if not executable:
             executable = installdir.split("/")[-1] + ".exe"
 
-        depot_id = next(
-            (k for k, v in app_data.get("depots", {}).items()
-             if k.isdigit() and isinstance(v, dict)),
-            None,
-        )
+        depots = cast(dict[str, Any], app_data.get("depots", {}))
+        depot_id = next((key for key in depots.keys() if key.isdigit()), None)
         return {"name": name, "installdir": installdir, "executable": executable, "depot_id": depot_id}
 
     except NetworkError as e:
@@ -96,15 +118,15 @@ def fetch_steam_app_info(appid: int) -> dict | None:
         return None
 
 
-def search_steam_games(query: str) -> list:
+def search_steam_games(query: str) -> list[SteamStoreItem]:
     """Search Steam store. Returns list of {id, name} dicts."""
     try:
         loading_animation(f"Searching Steam for '{query}'", 1.0)
-        data = fetch_json(
+        data = cast(dict[str, Any], fetch_json(
             config.STEAM_STORE_SEARCH_URL,
             params={"term": query, "l": "english", "cc": "US"},
-        )
-        return data.get("items", [])
+        ))
+        return cast(list[SteamStoreItem], data.get("items", []))
     except NetworkError as e:
         print_color(f"[!] Steam search error: {e}", Colors.YELLOW)
         return []
@@ -160,7 +182,7 @@ _STAGED_DEPOT_TEMPLATE = '''
 \t\t}}'''
 
 
-def generate_appmanifest(appid, name, installdir, steam_path, depot_id=None):
+def generate_appmanifest(appid: int, name: str, installdir: str, steam_path: Path, depot_id: str | None = None) -> Path | None:
     """Generate a realistic appmanifest_<appid>.acf (StateFlags 1026)."""
     acf_content = _ACF_TEMPLATE.format(
         appid=appid,
@@ -200,7 +222,7 @@ def _resolve_steam_path() -> Path | None:
     return Path(manual)
 
 
-def _pick_steam_game(query: str) -> dict | None:
+def _pick_steam_game(query: str) -> SteamStoreItem | None:
     """Search Steam and let the user choose a game."""
     results = search_steam_games(query)
     if not results:
@@ -231,7 +253,7 @@ def _pick_steam_game(query: str) -> dict | None:
     return results[idx - 1]
 
 
-def _prompt_app_info_manually(appid: int) -> dict:
+def _prompt_app_info_manually(appid: int) -> SteamAppInfo:
     """Fallback: ask user to type Steam app info."""
     print_color("[!] Could not fetch app info automatically.", Colors.YELLOW)
     print_color("[*] Enter details manually:", Colors.CYAN)
@@ -243,7 +265,7 @@ def _prompt_app_info_manually(appid: int) -> dict:
     }
 
 
-def steam_quest_mode(faker) -> None:
+def steam_quest_mode(faker: GameFaker) -> None:
     """Steam Quest Mode – generates appmanifest + fake exe for any Steam appid."""
     print_boxed_title("STEAM QUEST MODE", width=55, color=Colors.CYAN)
     print_color("[*] This mode generates a fake Steam appmanifest + exe", Colors.CYAN)
@@ -264,7 +286,7 @@ def steam_quest_mode(faker) -> None:
     if not game:
         return
 
-    appid = int(game['id'])
+    appid = int(game["id"])
     print_color(f"\n[OK] Selected: {game['name']} (AppID: {appid})", Colors.GREEN, bold=True)
     info = fetch_steam_app_info(appid) or _prompt_app_info_manually(appid)
 

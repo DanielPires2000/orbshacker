@@ -44,15 +44,26 @@ def _schedule_delete(path: Path) -> None:
         return
 
     delete_command = (
-        f'ping 127.0.0.1 -n 3 >nul & del /f /q "{path}"'
+        "$target = '" + str(path) + "'; "
+        "for ($i = 0; $i -lt 30; $i++) { "
+        "if (-not (Test-Path -LiteralPath $target)) { break }; "
+        "Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue; "
+        "Start-Sleep -Seconds 1 }"
     )
     try:
         subprocess.Popen(
-            ["cmd", "/c", delete_command],
+            [
+                "powershell",
+                "-NoProfile",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                delete_command,
+            ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
-            creationflags=0x00000008,
+            creationflags=0x00000008 | 0x08000000,
         )
     except Exception:
         _cleanup_old_exe(path)

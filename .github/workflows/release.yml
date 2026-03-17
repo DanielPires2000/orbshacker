@@ -11,12 +11,14 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -25,23 +27,30 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Get and validate tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid tag format: ${GITHUB_REF_NAME}"
+            echo "Expected format: vX.Y.Z"
+            exit 1
+          fi
+
+          echo "TAG_NAME=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
       - name: Write version metadata
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          printf 'VERSION = "%s"\n' "$VERSION" > orbshacker/_version.py
+          VERSION="${{ steps.tag.outputs.TAG_NAME }}"
+          printf 'VERSION = "%s"\n' "${VERSION#v}" > orbshacker/_version.py
 
       - name: Build executable
         run: |
           pyinstaller --onefile --name orbshacker --console --add-data "settings.py;." --collect-all orbshacker orbshacker.py
 
-      - name: Get tag name
-        id: tag
-        shell: bash
-        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.6.1
         with:
           tag_name: ${{ steps.tag.outputs.TAG_NAME }}
           name: Orbshacker ${{ steps.tag.outputs.TAG_NAME }}

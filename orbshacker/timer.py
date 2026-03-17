@@ -19,8 +19,8 @@ TIMER_MINUTES    = 15
 
 
 class TimerApp:
-    def __init__(self, root):
-        self.root = root
+    def __init__(self, root: tk.Tk):
+        self.root: tk.Tk = root
         self.root.title(WINDOW_TITLE)
         self.root.geometry(WINDOW_SIZE)
         self.root.resizable(False, False)
@@ -28,13 +28,13 @@ class TimerApp:
 
         self.remaining = TIMER_MINUTES * 60
 
-        self.timer_label = tk.Label(
+        self.timer_label: tk.Label = tk.Label(
             root, text=f"{TIMER_MINUTES:02d}:00",
             font=("Consolas", 56, "bold"), fg=TEXT_COLOR, bg=BG_COLOR,
         )
         self.timer_label.pack(expand=True)
 
-        self.status_label = tk.Label(
+        self.status_label: tk.Label = tk.Label(
             root, text="Running",
             font=("Segoe UI", 10), fg=SECONDARY_COLOR, bg=BG_COLOR,
         )
@@ -53,7 +53,7 @@ class TimerApp:
             self.status_label.config(text="Complete", fg=DONE_COLOR)
 
 
-def run_timer():
+def run_timer() -> None:
     """Entry point for the fake game process."""
     root = tk.Tk()
     TimerApp(root)

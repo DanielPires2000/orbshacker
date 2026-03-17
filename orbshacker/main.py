@@ -4,6 +4,7 @@ main.py – Application entry point and main loop.
 
 import os
 import sys
+import subprocess
 import time
 
 from . import config
@@ -38,7 +39,11 @@ def main() -> None:
 
     while True:
         try:
-            os.system('cls' if os.name == 'nt' else 'clear')
+            subprocess.run(
+                'cls' if os.name == 'nt' else 'clear',
+                shell=True,
+                check=False,
+            )
             print_banner()
 
             if db.source:
