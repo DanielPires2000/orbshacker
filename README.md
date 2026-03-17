@@ -158,7 +158,7 @@ orbshacker/
 
 ## Configuration
 
-User-editable values live in `settings.py` at the project root. The file is loaded at startup and overrides any default from `orbshacker/config.py`. Runtime preferences and API timeouts go there. The application version is read from package metadata and is not user-configurable changing it would break update detection.
+User-editable values live in `settings.py` at the project root. The file is loaded at startup and overrides any default from `orbshacker/config.py`. Runtime preferences and API timeouts go there. The application version comes from the git tag used for the build and is not user-configurable; changing it manually would break update detection.
 
 <br/>
 

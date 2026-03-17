@@ -25,6 +25,12 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Write version metadata
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          printf 'VERSION = "%s"\n' "$VERSION" > orbshacker/_version.py
+
       - name: Build executable
         run: |
           pyinstaller --onefile --name orbshacker --console --add-data "settings.py;." --collect-all orbshacker orbshacker.py

@@ -4,7 +4,6 @@
 # ╚═══════════════════════════════════════════════════════════╝
 
 # ── App identity ──────────────────────────────────────────────
-VERSION   = "2.1.1"
 DEVELOPER = "Strykey"
 
 # ── GitHub repo (for auto-update in .exe builds) ─────────────

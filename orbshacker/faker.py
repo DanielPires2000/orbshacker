@@ -5,6 +5,7 @@ In frozen (.exe) mode:   copies orbshacker.exe itself → GameName.exe (--timer-
 In source mode:           copies pythonw.exe → GameName.exe + _orbshacker_timer.pyw
 """
 
+import os
 import sys
 import shutil
 import subprocess
@@ -112,14 +113,22 @@ class GameFaker:
 
             if self._frozen:
                 args = [str(exe_path), "--timer-mode"]
+                env = None
             else:
                 timer_script = exe_path.parent / "_orbshacker_timer.pyw"
                 args = [str(exe_path), str(timer_script)]
+                env = os.environ.copy()
+                base_prefix = Path(sys.base_prefix)
+                env["PYTHONHOME"] = str(base_prefix)
+
+                path_parts = [str(base_prefix), env.get("PATH", "")]
+                env["PATH"] = os.pathsep.join(part for part in path_parts if part)
 
             if sys.platform == 'win32':
                 DETACHED_PROCESS = 0x00000008
                 subprocess.Popen(
                     args,
+                    env=env,
                     creationflags=DETACHED_PROCESS,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -128,6 +137,7 @@ class GameFaker:
             else:
                 subprocess.Popen(
                     args,
+                    env=env,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL,

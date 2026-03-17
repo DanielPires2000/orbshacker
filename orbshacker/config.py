@@ -7,8 +7,14 @@ Internal-only constants (API URLs, headers, timeouts) live here
 and are NOT exposed in settings.py.
 """
 
-import importlib
-import sys
+import os
+import subprocess
+from pathlib import Path
+from typing import TypeVar, cast
+
+from . import _version as _build_version
+
+T = TypeVar("T")
 
 # ── Load user settings (root-level settings.py) ──────────────────────────────
 # This lets the user edit a single, visible file at the project root.
@@ -18,13 +24,53 @@ except ImportError:
     _user = None  # no user settings file – use all defaults
 
 
-def _get(name: str, default):
+def _get(name: str, default: T) -> T:
     """Return a value from the user settings module, falling back to *default*."""
-    return getattr(_user, name, default)
+    return cast(T, getattr(_user, name, default))
+
+
+def _git_version() -> str | None:
+    """Return the current git tag as a version string when available."""
+    commands = [
+        ["git", "describe", "--tags", "--exact-match", "HEAD"],
+        ["git", "describe", "--tags", "--abbrev=0", "--match", "v*"],
+    ]
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=True,
+                cwd=Path(__file__).resolve().parents[1],
+            )
+            tag = result.stdout.strip()
+            if tag:
+                return tag.lstrip("v")
+        except Exception:
+            continue
+    return None
+
+
+def _resolve_version() -> str:
+    """Resolve the app version from the build file or git tags."""
+    built_version = getattr(_build_version, "VERSION", None)
+    if built_version:
+        return str(built_version)
+
+    env_version = os.getenv("ORBSHACKER_VERSION")
+    if env_version:
+        return env_version
+
+    git_version = _git_version()
+    if git_version:
+        return git_version
+
+    return "0.0.0"
 
 
 # ── App identity ──────────────────────────────────────────────────────────────
-VERSION   = _get("VERSION",   "2.1.0")
+VERSION   = _resolve_version()
 DEVELOPER = _get("DEVELOPER", "Strykey")
 
 # ── GitHub repo ───────────────────────────────────────────────────────────────
