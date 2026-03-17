@@ -5,16 +5,57 @@ Only runs when the app is a compiled executable (sys.frozen).
 Compares the current VERSION against the latest GitHub Release tag.
 If a newer version exists, downloads the .exe asset and replaces itself.
 """
+# pyright: reportUnusedFunction=false
 
 import os
 import sys
+import subprocess
 import tempfile
 import requests
 from pathlib import Path
+from typing import TypedDict
 from packaging.version import Version, InvalidVersion
 
-from . import config
-from .ui import Colors, print_color, loading_animation
+from . import config, ui
+
+
+class ReleaseAsset(TypedDict):
+    name: str
+    browser_download_url: str
+
+
+class GitHubRelease(TypedDict, total=False):
+    tag_name: str
+    assets: list[ReleaseAsset]
+
+
+def _cleanup_old_exe(old_exe: Path) -> None:
+    """Delete a leftover backup executable if it exists."""
+    if old_exe.exists():
+        try:
+            old_exe.unlink()
+        except Exception:
+            pass
+
+
+def _schedule_delete(path: Path) -> None:
+    """Delete a file shortly after the updater restarts the app."""
+    if not path.exists():
+        return
+
+    delete_command = (
+        f'ping 127.0.0.1 -n 3 >nul & del /f /q "{path}"'
+    )
+    try:
+        subprocess.Popen(
+            ["cmd", "/c", delete_command],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            creationflags=0x00000008,
+        )
+    except Exception:
+        _cleanup_old_exe(path)
 
 
 def is_frozen() -> bool:
@@ -27,7 +68,7 @@ def _parse_version(tag: str) -> Version:
     return Version(tag.lstrip('v'))
 
 
-def _get_latest_release() -> dict | None:
+def _get_latest_release() -> GitHubRelease | None:
     """Fetch the latest release info from the GitHub API.
     Returns dict with 'tag_name' and 'assets' or None on failure.
     """
@@ -40,7 +81,7 @@ def _get_latest_release() -> dict | None:
         return None
 
 
-def _find_exe_asset(assets: list) -> dict | None:
+def _find_exe_asset(assets: list[ReleaseAsset]) -> ReleaseAsset | None:
     """Find the .exe download asset from a release."""
     for asset in assets:
         name = asset.get('name', '')
@@ -81,17 +122,18 @@ def _replace_exe(new_exe: Path) -> None:
     try:
         os.rename(current_exe, old_exe)
         new_exe.rename(current_exe)
-        print_color(f"[UPDATE] Updated to new version!", Colors.GREEN, bold=True)
-        print_color("[UPDATE] Restarting...", Colors.CYAN)
+        ui.print_color(f"[UPDATE] Updated to new version!", ui.Colors.GREEN, bold=True)
+        ui.print_color("[UPDATE] Restarting...", ui.Colors.CYAN)
 
         # Launch the new exe and exit
         os.startfile(str(current_exe))
+        _schedule_delete(old_exe)
         sys.exit(0)
     except Exception as e:
         # Try to restore original
         if old_exe.exists() and not current_exe.exists():
             os.rename(old_exe, current_exe)
-        print_color(f"[UPDATE] Failed to apply update: {e}", Colors.RED)
+        ui.print_color(f"[UPDATE] Failed to apply update: {e}", ui.Colors.RED)
 
 
 def auto_update() -> None:
@@ -103,8 +145,10 @@ def auto_update() -> None:
     if not is_frozen():
         return  # Running from source – skip update entirely
 
+    _cleanup_old_exe(Path(sys.executable).with_suffix('.old'))
+
     try:
-        loading_animation("Checking for updates", 1.2)
+        ui.loading_animation("Checking for updates", 1.2)
     except Exception:
         pass
 
@@ -122,26 +166,35 @@ def auto_update() -> None:
         return
 
     if remote_version <= local_version:
-        print_color(f"[UPDATE] You're up to date (v{config.VERSION})", Colors.CYAN)
+        ui.print_color(f"[UPDATE] You're up to date (v{config.VERSION})", ui.Colors.CYAN)
         return
 
     # 3. Find exe download
     asset = _find_exe_asset(release.get('assets', []))
     if not asset:
-        print_color(f"[UPDATE] v{tag} available but no .exe found in release", Colors.YELLOW)
-        print_color(f"[UPDATE] Download manually: {config.REPO_URL}/releases/latest", Colors.GRAY)
+        ui.print_color(f"[UPDATE] v{tag} available but no .exe found in release", ui.Colors.YELLOW)
+        ui.print_color(f"[UPDATE] Download manually: {config.REPO_URL}/releases/latest", ui.Colors.GRAY)
         return
 
     # 4. Download + replace
-    print_color(f"[UPDATE] New version available: {config.VERSION} → {tag}", Colors.GREEN, bold=True)
+    ui.print_color(f"[UPDATE] New version available: {config.VERSION} → {tag}", ui.Colors.GREEN, bold=True)
     try:
-        loading_animation(f"Downloading {asset['name']}", 2.0)
-        tmp = Path(tempfile.mktemp(suffix='.exe'))
-        _download_file(asset['browser_download_url'], tmp)
-        _replace_exe(tmp)
+        ui.loading_animation(f"Downloading {asset['name']}", 2.0)
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.exe') as tmp_file:
+            tmp_path = Path(tmp_file.name)
+
+        try:
+            _download_file(asset['browser_download_url'], tmp_path)
+            _replace_exe(tmp_path)
+        finally:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
     except Exception as e:
-        print_color(f"[UPDATE] Download failed: {e}", Colors.YELLOW)
-        print_color(f"[UPDATE] Download manually: {config.REPO_URL}/releases/latest", Colors.GRAY)
+        ui.print_color(f"[UPDATE] Download failed: {e}", ui.Colors.YELLOW)
+        ui.print_color(f"[UPDATE] Download manually: {config.REPO_URL}/releases/latest", ui.Colors.GRAY)
 
 
 # ── Kept for tests (pure functions) ───────────────────────────────────────────
