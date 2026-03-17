@@ -108,8 +108,9 @@ python -m orbshacker
 
 `1` Search Discord database by name or abbreviation  
 `2` Manual mode enter a custom executable name  
-`3` Credits and project info  
-`4` Exit
+`3` Steam special quest mod
+`4` Credits and project info  
+`5` Exit
 
 ### Completing all quests in 15 minutes
 
