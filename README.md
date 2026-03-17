@@ -1,249 +1,193 @@
-# Discord Orb Quest Faker
+<div align="center">
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0a0a0a,60:0d1f0d,100:1a4a1a&height=200&section=header&text=orbshacker&fontSize=70&fontColor=4ade80&fontAlignY=55&animation=fadeIn" width="100%"/>
 
-> **WARNING: EDUCATIONAL PURPOSES ONLY**
-> 
-> This tool is provided **STRICTLY for educational and research purposes**. It is intended to help users understand how Discord's game detection system works and to study process manipulation techniques.
-> 
-> **The developers do NOT condone or encourage any misuse of this software. Users are solely responsible for compliance with all applicable laws and terms of service. Use at your own risk.**
+<br/>
 
-A professional tool that automatically creates fake game processes for Discord Orb quests without requiring actual game installations. Because who has time to install 500GB games just for some orbs?
+[![Python](https://img.shields.io/badge/Python-3.7+-3572A5?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20Only-555555?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/strykey/orbshacker)
+[![Discord](https://img.shields.io/badge/Discord-Game%20Spoofer-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com)
+[![License](https://img.shields.io/badge/License-GPL%20v3-c0392b?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](./LICENSE)
+[![Version](https://img.shields.io/badge/Version-2.1.0-4ade80?style=for-the-badge&logo=semanticrelease&logoColor=white)](https://github.com/strykey/orbshacker/releases)
 
-<img width="485" height="426" alt="Capture d'écran 2026-01-16 204625" src="https://github.com/user-attachments/assets/07cbdd26-b248-4bd0-8092-61a54c80d2ed" />
+<br/>
 
-## 🚨 BIG NEWS !! Steam Quest Mode 🚨
+*Because who has time to install 500GB of games just for some orbs.*
 
-A major new feature has been added: **Steam Quest Mode**.
+<br/>
 
-Some games (like Marathon or Toxic Commando) use a more advanced detection method, Discord doesn't just check the process name and folder, it also verifies that Steam has actually registered the game as downloading. Without this, the standard spoofing methods simply don't work.
+[Get Started](#installation) &nbsp;·&nbsp; [How it works](#how-it-works) &nbsp;·&nbsp; [Steam Mode](#steam-quest-mode) &nbsp;·&nbsp; [Usage](#usage) &nbsp;·&nbsp; [Structure](#project-structure) &nbsp;·&nbsp; [Legal](#legal-notice)
 
-**Steam Quest Mode bypasses this entirely**, with no download required.
+</div>
+
+<br/>
+
+## What is this
+
+orbshacker is a Windows tool that creates fake game processes for Discord Orb quests without installing the actual games. It reads Discord's own public API to get the exact process names Discord expects, copies a base executable, renames it, and launches it in the background. Discord scans your process list, sees what it's looking for, and marks the quest as active.
+
+No client modification. No code injection. No suspicious network traffic. Just a process name sitting in your task list, which is all Discord ever checks.
+
+> **Educational purposes only.** This tool is provided to study how Discord's game detection system works and to explore process manipulation techniques. Use at your own risk and in compliance with all applicable terms of service.
+
+<br/>
+
+## 🚨 Steam Quest Mode
+
+Some games use a more advanced detection method. Discord doesn't just check the process name it also verifies that Steam has registered the game as downloading. Standard spoofing doesn't work for those. Steam Quest Mode does.
 
 ### How it works
 
-1. You search for the game by name directly inside the tool, no need to go to SteamDB or look up AppIDs manually
-2. The tool fetches the game's metadata from the SteamCMD public API (install directory, executable path, depot info)
-3. It retrieves your Steam ID automatically from the Windows registry
-4. It generates a fake `appmanifest_<appid>.acf` file in your `steamapps/` folder : this is the exact file Steam creates when a download is in progress, with realistic values (`StateFlags 1026`, `LastOwner`, `StagedDepots`, etc.)
-5. It places the fake executable directly in `steamapps/common/<game>/`
-6. Discord scans your steamapps folder, finds the manifest, sees the process running, and validates the quest
+You search for the game by name directly inside the tool. The tool fetches the game's metadata from the SteamCMD public API install directory, executable path, depot info and retrieves your Steam ID automatically from the Windows registry. It generates a fake `appmanifest_<appid>.acf` file in your `steamapps/` folder, the exact file Steam creates when a download is in progress, with realistic values (`StateFlags 1026`, `LastOwner`, `StagedDepots`, etc.). The fake executable goes directly into `steamapps/common/<game>/`. Discord scans the folder, finds the manifest, sees the process running, and validates the quest. Cleans up after itself when you're done.
 
-### What's supported
+**Supported:**
+`Any game requiring a Steam manifest` &nbsp; `Fully automatic, no manual AppID lookup` &nbsp; `Uses your real Steam ID` &nbsp; `Searches demos and full games separately` &nbsp; `Auto-cleanup on exit`
 
-- ✅ Works for any game that requires a Steam manifest to be detected
-- ✅ Fully automatic, no manual AppID lookup needed
-- ✅ Your real Steam ID is used so the manifest looks legitimate
-- ✅ Searches demos and full games separately (important : quests often target the Demo version)
-- ✅ Cleans up after itself once you're done
+> **Tip:** If a quest targets a demo, search for `"Toxic Commando Demo"` instead of `"Toxic Commando"`. They have different AppIDs and the wrong one won't trigger the quest.
 
-> **TIP:** If a quest targets a demo, search for `"Toxic Commando Demo"` instead of just `"Toxic Commando"` : they have different AppIDs and the wrong one won't work.
+<br/>
 
 ## Features
 
-- **Automatic Game Detection**: Connects to Discord's official API to fetch the latest list of detectable games
-- **Smart Search**: Search games by name or abbreviation (PUBG, LoL, CSGO, etc.)
-- **Auto-Launch**: Automatically launches fake processes in the background
-- **Multi-Game Support**: Run multiple instances to emulate multiple games simultaneously and complete all orb quests at once
-- **Backup Database**: Falls back to GitHub archive if Discord API is unavailable
-- **Beautiful Interface**: Colored terminal interface with loading animations (because black and white is boring)
-- **Manual Mode**: Support for custom executable names
-- **Fast & Efficient**: No bloat, just works
+**Automatic Game Detection** pulls the latest detectable game list from Discord's official API. Smart search lets you find games by name or abbreviation PUBG, LoL, CSGO. Auto-launch handles everything in the background.
+
+**Multi-Game Support** lets you run multiple fake processes simultaneously, completing all orb quests at once. Launch a game, press Enter, pick another, repeat. Each process runs independently and Discord sees all of them.
+
+**Backup Database** falls back to a GitHub archive if Discord's API is unavailable, so the tool keeps working even when the primary source is down.
+
+**Manual Mode** supports custom executable names if you need to spoof something not in the database.
+
+**Beautiful Interface** is a colored terminal UI with loading animations, because plain text is boring.
+
+<br/>
+
+## Why this method works
+
+Discord's game detection reads your Windows process list. It sees `TslGame.exe` and assumes you're playing PUBG. There is no technical mechanism in place to verify whether that process is the actual game or a renamed executable. The name is all it checks.
+
+To detect this method, Discord would need kernel-level anti-cheat software comparable to Valorant's Vanguard deep system access, raised privacy concerns, a broken promise of being a lightweight chat app. That is not happening for cosmetic orb quests.
+
+**What this is not:** This tool does not inject code into Discord's console, modify client files, or send fake API requests. Those methods leave traces. Discord can detect when their JavaScript has been tampered with. Our approach leaves Discord's client completely untouched. The tool uses Discord's own public API to fetch the game list. No client modification. No integrity violations.
+
+<br/>
 
 ## Requirements
 
-- Python 3.7 or higher
-- **Windows ONLY** - This tool is designed exclusively for Windows. Linux/macOS are not supported.
-- Internet connection (for database fetching)
-- **Discord MUST be running**. The game spoofer only works when Discord is active and scanning processes
+Python 3.7 or higher, Windows only. Internet connection for database fetching. Discord must be running the spoofer only works when Discord is active and scanning processes.
+
+<br/>
 
 ## Installation
 
-1. Clone this repository:
 ```bash
 git clone https://github.com/strykey/orbshacker.git
 cd orbshacker
-```
-
-2. Install dependencies:
-```bash
 pip install -r requirements.txt
 ```
 
-3. Place `exe.exe` in the project root directory (this is the base executable that will be copied and renamed)
+Place `exe.exe` in the project root directory. This is the base executable that gets copied and renamed for each fake process.
+
+<br/>
 
 ## Usage
 
-Run the main script:
 ```bash
 python orbshacker.py
 ```
 
-### Menu Options
+Or via the package entry point:
 
-1. **Search Discord Database**: Search for games using Discord's official API
-2. **Manual Mode**: Enter a custom executable name manually
-3. **Credits & Info**: View project information and credits
-4. **Exit**: Quit the application
+```bash
+python -m orbshacker
+```
 
-### How It Works
+### Menu options
 
-This tool works as a **game process spoofer**. It tricks Discord into thinking you're running a game by creating fake processes with the exact names Discord expects.
+`1` Search Discord database by name or abbreviation  
+`2` Manual mode enter a custom executable name  
+`3` Credits and project info  
+`4` Exit
 
-## Why This Method Is Undetectable
+### Completing all quests in 15 minutes
 
-This tool is completely safe and undetectable because it works entirely on your local machine without ever touching Discord's client.
+Launch the tool. Select your first game. After the process is launched, press Enter to return to the main menu. Select another game. Repeat as many times as needed no need to open multiple windows. Every fake process runs in parallel. Discord detects all of them simultaneously. Wait 15 minutes. Close everything when done.
 
-**The key difference from other methods:**
-Most orb quest cheats work by injecting code into Discord's console or modifying the client files. Those methods are dangerous because Discord can detect when you've tampered with their client. They can see modified code, fake API requests, and client integrity violations. Getting banned is just a matter of time.
+<br/>
 
-Our method is fundamentally different. We don't modify Discord at all. We simply create processes on your computer with the correct names. When Discord scans your running processes (which is a normal Windows function), it sees our fake process and thinks it's a real game. That's it.
+## How it works
 
-**Why Discord cannot detect this:**
-Discord's game detection works by reading your process list. It sees "TslGame.exe" running and assumes you're playing PUBG. There is no technical way for Discord to verify whether that process is the actual game or just a renamed executable. The process name is all Discord checks.
+The tool connects to Discord's official API (`/api/v9/applications/detectable`) to get the live game list. It extracts the exact process name Discord expects for each game. It copies `exe.exe` to `Desktop/Win64/`, renames the copy to match the game's executable name, and launches it in the background. The process stays running until you close it. Discord keeps detecting it for as long as it runs.
 
-To detect our method, Discord would need to implement kernel-level anti-cheat software like Valorant's Vanguard. This would require deep system access, raise massive privacy concerns, and break their promise of being a lightweight chat app. They will never do this just for cosmetic orb quests.
+Steam Quest Mode adds a layer: it generates a fake `appmanifest_<appid>.acf` in `steamapps/` and places the executable in `steamapps/common/<game>/`, satisfying Discord's additional manifest check for games like Marathon or Toxic Commando.
 
-## Why Console Scripts Get You Banned
-
-**Console script injection is detectable and dangerous:**
-When you paste code into Discord's developer console, you're directly modifying how Discord's client works. This leaves traces everywhere. Discord can check if their JavaScript has been tampered with, they can see unusual API requests, and they can detect when their client isn't behaving normally. This is explicitly against their Terms of Service and is easy to catch.
-
-**Our method versus console scripts:**
-Console scripts modify Discord's code and send fake requests to Discord's servers. This is client tampering and is explicitly forbidden. Discord has detection systems for this and regularly bans people who use these methods.
-
-Our tool creates processes on your own computer. Discord's client remains completely untouched and unmodified. We use Discord's own public API to fetch the game list, which is perfectly legal. No code injection, no client modification, no suspicious network traffic. Just a normal process running on your machine.
-
-**The technical reality:**
-From Discord's perspective, our fake process looks identical to a legitimate game. Both are just process names in your Windows task list. Discord would need to verify the actual game files, check digital signatures, or implement invasive anti-cheat measures to tell the difference. They don't do any of this because it would be massive overkill for a cosmetic reward system.
-
-**IMPORTANT: Discord MUST be running for this to work!**
-
-1. The tool connects to Discord's official API (`/api/v9/applications/detectable`) to get the latest game list
-2. It finds the exact process name Discord expects for each game
-3. Copies `exe.exe` to `Desktop/Win64/` and renames it to match the game's executable name
-4. Launches the fake process in the background
-5. **Discord detects the running process** (because it scans for process names) and thinks you're playing the game
-6. The fake process must stay running for Discord to continue detecting it
-
-**How the spoofing works:**
-- Discord scans your running processes to detect games
-- It looks for specific executable names (e.g., `TslGame.exe` for PUBG)
-- This tool creates a fake process with that exact name
-- Discord sees the process name and assumes you're playing the game
-- No actual game files are needed, just the process name match
-
-**Multi-Game Emulation:**
-- You can emulate multiple games simultaneously from a single window
-- After launching a game, press Enter to return to the main menu
-- Select another game and repeat as many times as needed
-- Each fake process runs independently, so Discord detects all of them
-- This allows you to complete **all orb quests at once in just 15 minutes**
-- All fake processes will run in parallel and Discord will detect them all
-- No need to open multiple windows, just use the menu repeatedly
-
-### Database Sources
-
-- **Primary**: Discord Official API. Live database with all detectable games, always up to date
-- **Backup**: GitHub Archive by Cynosphere. Used if Discord API is unavailable
+<br/>
 
 ## Project Structure
 
 ```
 orbshacker/
-├── orbshacker.py      # Main application
-├── exe.py             # GUI timer application
-├── exe.exe            # Base executable (required)
-├── requirements.txt   # Python dependencies
-├── README.md          # This file
-├── LICENSE            # MIT License
-├── CONTRIBUTING.md    # Contribution guidelines
-└── .gitignore         # Git ignore rules
+├── orbshacker.py          Main entry point
+├── orbshacker/
+│   ├── __init__.py        Version and author metadata
+│   ├── __main__.py        Package entry point, --timer-mode support
+│   ├── config.py          Centralized configuration with settings.py overrides
+│   ├── faker.py           Fake executable creation and launch logic
+│   ├── discord_db.py      Game database loading, search, and selection
+│   ├── steam.py           Steam registry helpers and manifest generation
+│   ├── updater.py         Auto-update from GitHub releases
+│   ├── net.py             HTTP helpers
+│   ├── ui.py              Terminal colors, animations, prompts
+│   └── errors.py          Custom exception hierarchy
+├── tests/                 pytest coverage for pure helpers
+├── settings.py            User-editable configuration
+├── requirements.txt
+└── .github/
+    └── workflows/
+        └── release.yml    PyInstaller build and GitHub Release automation
 ```
 
-## Technical Details
+<br/>
 
-### Classes
+## Configuration
 
-- **`DiscordGamesDB`**: Handles game database loading from Discord API or GitHub backup
-- **`GameFaker`**: Manages fake game executable creation and launching
-- **`Colors`**: ANSI color codes for terminal output
+User-editable values live in `settings.py` at the project root. The file is loaded at startup and overrides any default from `orbshacker/config.py`. Runtime preferences and API timeouts go there. The application version is read from package metadata and is not user-configurable changing it would break update detection.
 
-### Key Functions
+<br/>
 
-- `load_games_list()`: Loads games from Discord API or GitHub backup
-- `search_games(query)`: Searches for games by name or alias
-- `get_win32_executable(game)`: Extracts primary Windows executable from game data
-- `create_fake_game(exe_name)`: Creates fake game executable
-- `launch_executable(exe_path)`: Launches executable in background
+## Auto-updater
 
-## WARNING: Legal Notice & Disclaimer
+When a new version tag is pushed, GitHub Actions builds a standalone Windows executable using PyInstaller and publishes it as a GitHub Release. The tool checks for updates on launch, downloads the new binary, swaps it in place, and restarts automatically. No Python installation needed to run the distributed executable.
 
-**EDUCATIONAL PURPOSES ONLY - NO COMMERCIAL USE**
+<br/>
 
-This tool is provided **STRICTLY for educational and research purposes**. It is intended to help users understand how Discord's game detection system works and to study process manipulation techniques.
+## Legal Notice
 
-**COMMERCIAL USE IS STRICTLY PROHIBITED. This software may not be used, distributed, or sold for commercial purposes under any circumstances.**
+**Educational purposes only. No commercial use.**
 
-### Important Warnings
+This tool is provided strictly for educational and research purposes to study how Discord's game detection system works and to explore process manipulation techniques. Commercial use, distribution, or sale is strictly prohibited.
 
-- **NO COMMERCIAL USE**: This software is for educational purposes only. Commercial use, distribution, or sale is strictly prohibited.
-- **The developers do NOT condone or encourage any misuse of this software**
-- **Users are SOLELY responsible for their actions** and must comply with:
-  - All applicable local, state, and federal laws
-  - Discord's Terms of Service
-  - Any other relevant terms of service or agreements
-- **Misuse of this tool may violate Discord's Terms of Service**
-- **The developers are NOT responsible** for any consequences resulting from the use or misuse of this software
-- **Use at your own risk**. No warranties or guarantees are provided
+Users are solely responsible for compliance with all applicable laws, Discord's Terms of Service, and any other relevant agreements. The developers do not condone misuse and are not responsible for any consequences resulting from use of this software. No warranties or guarantees are provided. Use at your own risk.
 
-### Important Requirements
+Misuse of this tool may violate Discord's Terms of Service.
 
-- **Discord MUST be running**. The tool won't work if Discord is closed
-- The fake process must stay running for Discord to detect it
-- Close the fake executable after completing the quest
-- Discord needs to be able to scan processes (normal operation)
-- This tool is for educational purposes only
-- Use responsibly and at your own risk
-
-### Multi-Game Strategy
-
-**Complete all orb quests in 15 minutes:**
-1. Launch the tool and select your first game
-2. After the process is launched, press Enter to return to the main menu
-3. Select another game from the menu
-4. Repeat steps 2-3 for as many games as you want (no need to open multiple windows!)
-5. All fake processes will run simultaneously in the background
-6. Discord will detect all of them and complete all quests at once
-7. Wait 15 minutes for all quests to complete
-8. Close all fake processes when done
-
-This works because each fake process has a unique name, so Discord treats them as separate games running simultaneously. You can emulate as many games as you want from a single window by simply pressing Enter after each launch to return to the menu.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+<br/>
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 (GPL-3.0). See the [LICENSE](LICENSE) file for details.
+GPL v3. Attribution required. Modified versions must also be GPL v3. Source code must be provided with any distribution. Commercial use is strictly prohibited. See [LICENSE](./LICENSE) for full terms.
 
-**GPL v3 Key Points:**
-- **Attribution Required**: You must credit the original author
-- **Share Alike**: Any modified versions must also be GPL v3
-- **Source Code**: You must provide source code when distributing
-- **NO COMMERCIAL USE**: This software is provided for educational purposes only. Commercial use, distribution, or sale of this software or any derivative works is strictly prohibited.
+<br/>
 
-## Author
+<div align="center">
 
-**Strykey**
+made with questionable life choices by **Strykey**
 
-*"Because sometimes you just need those orbs without the commitment of a 100GB download."*
+<br/>
 
+[![GitHub stars](https://img.shields.io/github/stars/strykey/orbshacker?style=for-the-badge&color=4ade80&labelColor=1a1a1a)](https://github.com/strykey/orbshacker/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/strykey/orbshacker?style=for-the-badge&color=4ade80&labelColor=1a1a1a)](https://github.com/strykey/orbshacker/network)
 
+<br/>
 
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:4ade80,40:0d1f0d,100:0a0a0a&height=120&section=footer" width="100%"/>
 
-
-
-
-
-
-
+</div>
