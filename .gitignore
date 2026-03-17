@@ -138,4 +138,5 @@ desktop.ini
 Win64/
 *.exe
 !exe.exe
+.backups/
 
