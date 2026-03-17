@@ -7,7 +7,6 @@ Internal-only constants (API URLs, headers, timeouts) live here
 and are NOT exposed in settings.py.
 """
 
-import os
 import subprocess
 from pathlib import Path
 from typing import TypeVar, cast
@@ -53,14 +52,10 @@ def _git_version() -> str | None:
 
 
 def _resolve_version() -> str:
-    """Resolve the app version from the build file or git tags."""
+    """Resolve the app version from build metadata or git tags."""
     built_version = getattr(_build_version, "VERSION", None)
     if built_version:
         return str(built_version)
-
-    env_version = os.getenv("ORBSHACKER_VERSION")
-    if env_version:
-        return env_version
 
     git_version = _git_version()
     if git_version:
