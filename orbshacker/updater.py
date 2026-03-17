@@ -43,23 +43,23 @@ def _schedule_delete(path: Path) -> None:
     if not path.exists():
         return
 
-    delete_command = (
-        "$target = '" + str(path) + "'; "
-        "for ($i = 0; $i -lt 30; $i++) { "
-        "if (-not (Test-Path -LiteralPath $target)) { break }; "
-        "Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue; "
-        "Start-Sleep -Seconds 1 }"
-    )
     try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".cmd", mode="w", encoding="utf-8") as script_file:
+            script_path = Path(script_file.name)
+            script_file.write(
+                "@echo off\r\n"
+                f'set "TARGET={path}"\r\n'
+                ":loop\r\n"
+                "del /f /q \"%TARGET%\" >nul 2>&1\r\n"
+                "if exist \"%TARGET%\" (\r\n"
+                "  timeout /t 1 /nobreak >nul\r\n"
+                "  goto loop\r\n"
+                ")\r\n"
+                "del /f /q \"%~f0\" >nul 2>&1\r\n"
+            )
+
         subprocess.Popen(
-            [
-                "powershell",
-                "-NoProfile",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                delete_command,
-            ],
+            ["cmd", "/c", str(script_path)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
