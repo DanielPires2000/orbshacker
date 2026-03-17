@@ -106,11 +106,11 @@ python -m orbshacker
 
 ### Menu options
 
-`1` Search Discord database by name or abbreviation  
-`2` Manual mode enter a custom executable name  
-`3` Steam special quest mod
-`4` Credits and project info  
-`5` Exit
+`1` &nbsp; Search Discord database by name or abbreviation
+`2` &nbsp; Manual mode, enter a custom executable name
+`3` &nbsp; Steam special quest mode
+`4` &nbsp; Credits and project info
+`5` &nbsp; Exit
 
 ### Completing all quests in 15 minutes
 
