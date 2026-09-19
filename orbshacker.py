@@ -36,20 +36,20 @@ def is_faked_game() -> bool:
 
 def show_console() -> None:
     """Allocate and show a Windows console window if running on Windows."""
-    if sys.platform == "win32":
+    if sys.platform == "win32" and getattr(sys, "frozen", False):
         try:
             import ctypes
             # Only allocate a console if we don't have one already
             if not ctypes.windll.kernel32.GetConsoleWindow():
                 # Try to attach to parent console first
-                if not ctypes.windll.kernel32.AttachConsole(-1):
-                    # Otherwise, allocate a new console window
-                    ctypes.windll.kernel32.AllocConsole()
+                attached = ctypes.windll.kernel32.AttachConsole(-1)
+                allocated = False if attached else bool(ctypes.windll.kernel32.AllocConsole())
                 
-                # Reopen standard streams
-                sys.stdout = open("CONOUT$", "w", encoding="utf-8")
-                sys.stderr = open("CONOUT$", "w", encoding="utf-8")
-                sys.stdin = open("CONIN$", "r", encoding="utf-8")
+                # Reopen standard streams only if console attachment or allocation succeeded
+                if attached or allocated:
+                    sys.stdout = open("CONOUT$", "w", encoding="utf-8")
+                    sys.stderr = open("CONOUT$", "w", encoding="utf-8")
+                    sys.stdin = open("CONIN$", "r", encoding="utf-8")
         except Exception:
             pass
 
