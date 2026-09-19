@@ -105,6 +105,18 @@ def _find_source_exe() -> Path:
     if _is_frozen():
         return Path(sys.executable)  # copy ourselves
 
+    # Prefer built orbshacker.exe if present in dist/ or project root
+    root_dir = Path(__file__).resolve().parents[1]
+    candidates = [
+        root_dir / "dist" / "orbshacker.exe",
+        root_dir / "orbshacker.exe",
+        Path.cwd() / "dist" / "orbshacker.exe",
+        Path.cwd() / "orbshacker.exe",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
     # Source mode: prefer the real pythonw.exe from sys.base_prefix to avoid venv launcher stub issues
     base_dir = Path(sys.base_prefix)
     pythonw = base_dir / "pythonw.exe"
@@ -123,8 +135,8 @@ def _find_source_exe() -> Path:
 
 class GameFaker:
     def __init__(self):
-        self._frozen = _is_frozen()
         self._source_exe = _find_source_exe()
+        self._frozen = _is_frozen() or self._source_exe.name.lower() == "orbshacker.exe"
         self.chosen_path = config.CHOSEN_FOLDER
         self._created_files = []
         self._created_dirs = []
