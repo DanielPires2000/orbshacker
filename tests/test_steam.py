@@ -72,7 +72,6 @@ class TestPickWindowsExe:
         assert sanitize_relative_path(raw_exe) == "Bin/Win64/GameQuest.exe"
 
 
-
 class TestResolveExecutable:
     def test_fc27_uses_known_executable_without_launch_metadata(self):
         # EA's launch URI doesn't give Steam a normal Windows executable to detect.
@@ -81,7 +80,7 @@ class TestResolveExecutable:
     def test_other_games_keep_normal_detection(self):
         launch = {
             "0": {
-                "executable": "Bin\\\\game.exe",
+                "executable": "Bin\\game.exe",
                 "config": {"oslist": "windows"},
             },
         }
