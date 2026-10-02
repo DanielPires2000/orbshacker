@@ -1,6 +1,6 @@
 """Tests for steam.py – pure functions only (no network calls)."""
 
-from orbshacker.steam import _pick_windows_exe
+from orbshacker.steam import _pick_windows_exe, _resolve_executable
 
 
 class TestPickWindowsExe:
@@ -71,3 +71,17 @@ class TestPickWindowsExe:
         raw_exe = _pick_windows_exe(launch)
         assert sanitize_relative_path(raw_exe) == "Bin/Win64/GameQuest.exe"
 
+
+class TestResolveExecutable:
+    def test_fc27_uses_known_executable_without_launch_metadata(self):
+        # EA's launch URI doesn't give Steam a normal Windows executable to detect.
+        assert _resolve_executable(4080220, "EA SPORTS FC 27", {}) == "fc27.exe"
+
+    def test_other_games_keep_normal_detection(self):
+        launch = {
+            "0": {
+                "executable": "Bin\\game.exe",
+                "config": {"oslist": "windows"},
+            },
+        }
+        assert _resolve_executable(1234, "Example Game", launch) == "Bin/game.exe"

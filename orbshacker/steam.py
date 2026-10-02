@@ -90,6 +90,18 @@ def _pick_windows_exe(launch: SteamLaunchMap) -> str | None:
     return None
 
 
+def _resolve_executable(appid: int, installdir: str, launch: SteamLaunchMap) -> str:
+    """Resolve the executable path, including known games with nonstandard launch metadata."""
+    # FC 27 launches through EA's URI, so Steam's launch data does not expose its game EXE.
+    if appid == 4080220:
+        return "fc27.exe"
+
+    executable = _pick_windows_exe(launch)
+    if not executable:
+        executable = installdir.split("/")[-1] + ".exe"
+    return sanitize_relative_path(executable)
+
+
 def fetch_steam_app_info(appid: int) -> SteamAppInfo | None:
     """Fetch app info from SteamCMD API. Returns dict or None on failure."""
     url = f"{config.STEAMCMD_API_URL}/{appid}"
@@ -107,11 +119,7 @@ def fetch_steam_app_info(appid: int) -> SteamAppInfo | None:
         raw_installdir = str(app_cfg.get("installdir", raw_name))
         installdir = sanitize_path_segment(raw_installdir) or name
         launch_map = cast(SteamLaunchMap, app_cfg.get("launch", {}))
-        executable = _pick_windows_exe(launch_map)
-
-        if not executable:
-            executable = installdir.split("/")[-1] + ".exe"
-        executable = sanitize_relative_path(executable)
+        executable = _resolve_executable(appid, installdir, launch_map)
 
         depots = cast(dict[str, Any], app_data.get("depots", {}))
         depot_id = next((key for key in depots.keys() if key.isdigit()), None)
