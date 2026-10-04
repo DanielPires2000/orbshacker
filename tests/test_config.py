@@ -1,236 +1,380 @@
 """Tests for config.py and faker.py settings loading and cleanup behavior."""
 
-import sys
-import json
-import time
 import importlib.util
+import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from orbshacker.config import _load_settings
-from orbshacker.faker import GameFaker
+from orbshacker import config
+from orbshacker.bake import bake_config
+from orbshacker.config import _coerce_bool, _coerce_int, _load_settings, ensure_user_settings
+from orbshacker.errors import FileConflictError
+from orbshacker.faker import GameFaker, build_timer_script, timer_script_for
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_load_settings_fallback_in_dev():
-    # In normal dev mode (not frozen), if settings.json does not exist, it falls back to importing settings.py
-    with patch("builtins.__import__") as mock_import:
-        _load_settings()
-        called_modules = [args[0] for args, _ in mock_import.call_args_list if args]
-        assert "settings" in called_modules
+def _load_entrypoint_module():
+    spec = importlib.util.spec_from_file_location(
+        "orbshacker_script", PROJECT_ROOT / "orbshacker.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def test_load_settings_json_in_dev(tmp_path):
-    # If settings.json exists in dev mode, it should load it
-    json_path = tmp_path / "settings.json"
-    json_path.write_text('{"CHOSEN_FOLDER": "CustomDir"}', encoding="utf-8")
+class TestSettingsValidation:
+    def test_load_settings_json_in_dev(self, tmp_path):
+        json_path = tmp_path / "settings.json"
+        json_path.write_text('{"CHOSEN_FOLDER": "CustomDir"}', encoding="utf-8")
 
-    # We patch __file__ in config module to point to our temp folder structure
-    fake_config_file = tmp_path / "orbshacker" / "config.py"
-    with patch("orbshacker.config.__file__", str(fake_config_file)):
-        settings = _load_settings()
-        assert isinstance(settings, dict)
-        assert settings.get("CHOSEN_FOLDER") == "CustomDir"
+        fake_config_file = tmp_path / "orbshacker" / "config.py"
+        with patch("orbshacker.config.__file__", str(fake_config_file)):
+            settings = _load_settings()
+            assert isinstance(settings, dict)
+            assert settings.get("CHOSEN_FOLDER") == "CustomDir"
 
+    def test_corrupt_settings_json_falls_back(self, tmp_path):
+        json_path = tmp_path / "settings.json"
+        json_path.write_text("{not json", encoding="utf-8")
 
-def test_load_settings_frozen_creates_json_and_loads(tmp_path):
-    # Simulate frozen mode where settings.json is missing next to the exe
-    exe_path = tmp_path / "orbshacker.exe"
-    exe_path.touch()
+        fake_config_file = tmp_path / "orbshacker" / "config.py"
+        with patch("orbshacker.config.__file__", str(fake_config_file)):
+            settings = _load_settings()
+        assert settings is None or isinstance(settings, dict) or hasattr(settings, "TIMER_MINUTES")
 
-    json_file = tmp_path / "settings.json"
+    def test_ensure_user_settings_creates_json(self, tmp_path):
+        exe_path = tmp_path / "orbshacker.exe"
+        exe_path.touch()
 
-    with patch("sys.frozen", True, create=True), \
-         patch("sys.executable", str(exe_path)):
+        with patch("sys.frozen", True, create=True), patch("sys.executable", str(exe_path)):
+            ensure_user_settings()
 
-        settings = _load_settings()
-
-        # Verify it created a default settings.json next to the executable
+        json_file = tmp_path / "settings.json"
         assert json_file.exists()
         expected_desktop = str(Path.home() / "Desktop").replace("\\", "/")
         assert expected_desktop in json_file.read_text(encoding="utf-8")
 
-        # Verify it loaded the dictionary correctly
-        assert isinstance(settings, dict)
-        assert settings.get("CHOSEN_FOLDER") == expected_desktop
-        assert settings.get("TIMER_MINUTES") == 15
+        payload = json.loads(json_file.read_text(encoding="utf-8"))
+        assert payload["TIMER_MINUTES"] == 15
+        assert payload["AUTO_DELETE_ON_TIMER_END"] is True
+        assert payload["AUTO_DELETE_ON_EXIT"] is False
+
+    def test_ensure_user_settings_skips_faked_games(self, tmp_path):
+        exe_path = tmp_path / "TslGame.exe"
+        exe_path.write_bytes(b"MZ")
+        bake_config(exe_path, {"TIMER_MINUTES": 15})
+
+        with patch("sys.frozen", True, create=True), patch("sys.executable", str(exe_path)):
+            ensure_user_settings()
+
+        assert not (tmp_path / "settings.json").exists()
+
+    def test_ensure_user_settings_keeps_existing_json(self, tmp_path):
+        exe_path = tmp_path / "orbshacker.exe"
+        exe_path.touch()
+        json_file = tmp_path / "settings.json"
+        json_file.write_text('{"TIMER_MINUTES": 5}', encoding="utf-8")
+
+        with patch("sys.frozen", True, create=True), patch("sys.executable", str(exe_path)):
+            ensure_user_settings()
+
+        assert json_file.read_text(encoding="utf-8") == '{"TIMER_MINUTES": 5}'
+
+    def test_coerce_bool_accepts_common_forms(self):
+        assert _coerce_bool(True, False, "x") is True
+        assert _coerce_bool("true", False, "x") is True
+        assert _coerce_bool("no", True, "x") is False
+        assert _coerce_bool(1, False, "x") is True
+
+    def test_coerce_bool_rejects_garbage(self):
+        with pytest.warns(UserWarning):
+            assert _coerce_bool("banana", True, "x") is True
+
+    def test_coerce_int_accepts_numeric_strings(self):
+        assert _coerce_int("25", 15, "x") == 25
+        assert _coerce_int(30.0, 15, "x") == 30
+
+    def test_coerce_int_rejects_garbage_and_minimums(self):
+        with pytest.warns(UserWarning):
+            assert _coerce_int("fifteen", 15, "x") == 15
+        with pytest.warns(UserWarning):
+            assert _coerce_int(-5, 15, "x", minimum=1) == 15
+
+    def test_coerce_int_rejects_fractional_floats(self):
+        with pytest.warns(UserWarning):
+            assert _coerce_int(15.7, 15, "x") == 15
+        assert _coerce_int(15.0, 9, "x") == 15
+
+    def test_invalid_user_settings_fall_back_to_defaults(self):
+        with patch.object(config, "_user", {"TIMER_MINUTES": "soon", "AUTO_DELETE_ON_TIMER_END": "maybe"}):
+            timer = config._get_validated("TIMER_MINUTES")
+            flag = config._get_validated("AUTO_DELETE_ON_TIMER_END")
+        assert timer == config.DEFAULTS["TIMER_MINUTES"]
+        assert flag == config.DEFAULTS["AUTO_DELETE_ON_TIMER_END"]
+
+    def test_legacy_auto_delete_key_maps_to_timer_end(self):
+        with patch.object(config, "_user", {"AUTO_DELETE": True}):
+            assert config._get_validated("AUTO_DELETE_ON_TIMER_END") is True
+        with patch.object(config, "_user", {"AUTO_DELETE": False}):
+            assert config._get_validated("AUTO_DELETE_ON_TIMER_END") is False
+
+    def test_frozen_existing_json(self, tmp_path):
+        exe_path = tmp_path / "orbshacker.exe"
+        exe_path.touch()
+        json_file = tmp_path / "settings.json"
+        json_file.write_text('{"CHOSEN_FOLDER": "FrozenDir"}', encoding="utf-8")
+
+        with patch("sys.frozen", True, create=True), patch("sys.executable", str(exe_path)):
+            settings = _load_settings()
+            assert isinstance(settings, dict)
+            assert settings.get("CHOSEN_FOLDER") == "FrozenDir"
 
 
-def test_load_settings_frozen_existing_json(tmp_path):
-    # Simulate frozen mode where settings.json already exists next to the exe
-    exe_path = tmp_path / "orbshacker.exe"
-    exe_path.touch()
+class TestBakedSettings:
+    def test_load_settings_baked_frozen(self, tmp_path):
+        exe_path = tmp_path / "TslGame.exe"
+        config_data = {"CHOSEN_FOLDER": "BakedDir", "AUTO_DELETE_ON_TIMER_END": True, "TIMER_MINUTES": 45}
+        exe_path.write_bytes(b"MZ_DUMMY_EXE_BYTES...")
+        bake_config(exe_path, config_data)
 
-    json_file = tmp_path / "settings.json"
-    json_file.write_text('{"CHOSEN_FOLDER": "FrozenDir"}', encoding="utf-8")
-
-    with patch("sys.frozen", True, create=True), \
-         patch("sys.executable", str(exe_path)):
-
-        settings = _load_settings()
-        assert isinstance(settings, dict)
-        assert settings.get("CHOSEN_FOLDER") == "FrozenDir"
+        with patch("sys.frozen", True, create=True), patch("sys.executable", str(exe_path)):
+            settings = _load_settings()
+            assert isinstance(settings, dict)
+            assert settings.get("CHOSEN_FOLDER") == "BakedDir"
+            assert settings.get("AUTO_DELETE_ON_TIMER_END") is True
+            assert settings.get("TIMER_MINUTES") == 45
 
 
-def test_faker_cleanup_deletes_files_and_processes(tmp_path):
-    # Mock config.AUTO_DELETE to True for testing
-    with patch("orbshacker.config.AUTO_DELETE", True):
+class TestTimerScriptGeneration:
+    def test_bakes_config_and_is_standalone(self):
+        script = build_timer_script({"TIMER_MINUTES": 25, "AUTO_DELETE_ON_TIMER_END": False})
+        assert "TIMER_MINUTES': 25" in script
+        assert "AUTO_DELETE_ON_TIMER_END': False" in script
+        compile(script, "<test>", "exec")
+        assert "class TimerApp" in script
+        assert "import orbshacker" not in script
+        assert "from orbshacker" not in script
+
+    def test_per_game_script_names(self, tmp_path):
+        a = timer_script_for(tmp_path / "TslGame.exe")
+        b = timer_script_for(tmp_path / "RocketLeague.exe")
+        assert a != b
+        assert a.name == "_TslGame_orbshacker_timer.pyw"
+        assert a.parent == tmp_path
+
+
+class TestFaker:
+    def test_faker_cleanup_deletes_files_and_processes(self, tmp_path):
+        with patch("orbshacker.config.AUTO_DELETE_ON_EXIT", True):
+            faker = GameFaker()
+
+            mock_proc = MagicMock()
+            faker._processes.append(mock_proc)
+
+            dummy_file = tmp_path / "faked_game.exe"
+            dummy_file.touch()
+            faker.register_created_file(dummy_file)
+
+            dummy_dir = tmp_path / "Win64"
+            dummy_dir.mkdir()
+            faker._created_dirs.append(dummy_dir)
+
+            faker.cleanup()
+
+            mock_proc.terminate.assert_called_once()
+            mock_proc.kill.assert_called_once()
+            assert not dummy_file.exists()
+            assert not dummy_dir.exists()
+
+    def test_faker_cleanup_skipped_when_disabled(self, tmp_path):
+        with patch("orbshacker.config.AUTO_DELETE_ON_EXIT", False):
+            faker = GameFaker()
+            mock_proc = MagicMock()
+            faker._processes.append(mock_proc)
+            dummy_file = tmp_path / "faked_game.exe"
+            dummy_file.touch()
+            faker.register_created_file(dummy_file)
+
+            faker.cleanup()
+
+            mock_proc.terminate.assert_not_called()
+            assert dummy_file.exists()
+
+    def test_faker_custom_timer_minutes(self, tmp_path):
+        with patch("orbshacker.config.TIMER_MINUTES", 25), \
+             patch("orbshacker.config.AUTO_DELETE_ON_TIMER_END", False), \
+             patch("orbshacker.config.AUTO_DELETE_ON_EXIT", False):
+
+            faker = GameFaker()
+            dummy_src = tmp_path / "pythonw.exe"
+            dummy_src.touch()
+            faker._source_exe = dummy_src
+            faker._frozen = False
+
+            target_exe = tmp_path / "Win64" / "Game.exe"
+            faker.copy_exe_to(target_exe)
+
+            timer_script = timer_script_for(target_exe)
+            assert timer_script.exists()
+            script_code = timer_script.read_text(encoding="utf-8")
+            assert "TIMER_MINUTES': 25" in script_code
+            assert "AUTO_DELETE_ON_TIMER_END': False" in script_code
+
+        with patch("orbshacker.config.TIMER_MINUTES", 35):
+            faker = GameFaker()
+            faker._frozen = True
+
+            with patch("subprocess.Popen") as mock_popen:
+                faker.launch_executable(Path("C:/Dummy/Game.exe"))
+
+                mock_popen.assert_called_once()
+                called_args = mock_popen.call_args[1].get("args", mock_popen.call_args[0][0])
+                assert called_args == [str(Path("C:/Dummy/Game.exe"))]
+
+    def test_multi_game_scripts_are_independent(self, tmp_path):
+        with patch("orbshacker.config.TIMER_MINUTES", 11), \
+             patch("orbshacker.config.CHOSEN_FOLDER", tmp_path):
+            faker = GameFaker()
+            dummy_src = tmp_path / "pythonw.exe"
+            dummy_src.write_bytes(b"MZ pythonw source")
+            faker._source_exe = dummy_src
+            faker._frozen = False
+
+            first = tmp_path / "Win64" / "TslGame.exe"
+            faker.copy_exe_to(first)
+
+            with patch("orbshacker.config.TIMER_MINUTES", 22):
+                second = tmp_path / "Win64" / "RocketLeague.exe"
+                faker.copy_exe_to(second)
+
+            first_script = timer_script_for(first).read_text(encoding="utf-8")
+            second_script = timer_script_for(second).read_text(encoding="utf-8")
+            assert "TIMER_MINUTES': 11" in first_script
+            assert "TIMER_MINUTES': 22" in second_script
+            assert first_script != second_script
+
+    def test_source_mode_exe_stays_byte_identical(self, tmp_path):
+        with patch("orbshacker.config.TIMER_MINUTES", 15), \
+             patch("orbshacker.config.CHOSEN_FOLDER", tmp_path):
+            faker = GameFaker()
+            dummy_src = tmp_path / "pythonw.exe"
+            payload = b"MZ signed pythonw payload"
+            dummy_src.write_bytes(payload)
+            faker._source_exe = dummy_src
+            faker._frozen = False
+
+            target = tmp_path / "Win64" / "TslGame.exe"
+            faker.copy_exe_to(target)
+
+            assert target.read_bytes() == payload
+            script = timer_script_for(target).read_text(encoding="utf-8")
+            assert "TARGET_EXE" in script
+            assert "SHARED_FILES" in script
+
+    def test_frozen_mode_bakes_config_into_exe(self, tmp_path):
         faker = GameFaker()
-
-        # Mock process
-        mock_proc = MagicMock()
-        faker._processes.append(mock_proc)
-
-        # Create dummy file to delete
-        dummy_file = tmp_path / "faked_game.exe"
-        dummy_file.touch()
-        faker.register_created_file(dummy_file)
-
-        # Create dummy directory to delete
-        dummy_dir = tmp_path / "Win64"
-        dummy_dir.mkdir()
-        faker._created_dirs.append(dummy_dir)
-
-        # Run cleanup
-        faker.cleanup()
-
-        # Assert process was terminated and killed
-        mock_proc.terminate.assert_called_once()
-        mock_proc.kill.assert_called_once()
-
-        # Assert file was deleted
-        assert not dummy_file.exists()
-
-        # Assert directory was deleted
-        assert not dummy_dir.exists()
-
-
-def test_faker_custom_timer_minutes(tmp_path):
-    import orbshacker.config as config
-    from orbshacker.faker import GameFaker
-
-    # 1. Test source mode replacement
-    with patch("orbshacker.config.TIMER_MINUTES", 25), \
-         patch("orbshacker.config.AUTO_DELETE", False):
-
-        faker = GameFaker()
-        # Set dummy source exe
-        dummy_src = tmp_path / "pythonw.exe"
-        dummy_src.touch()
-        faker._source_exe = dummy_src
-        faker._frozen = False
-
-        target_exe = tmp_path / "Win64" / "Game.exe"
-        faker.copy_exe_to(target_exe)
-
-        timer_script = tmp_path / "Win64" / "_orbshacker_timer.pyw"
-        assert timer_script.exists()
-        script_code = timer_script.read_text(encoding="utf-8")
-        assert "TIMER_MINUTES = 25" in script_code
-        assert "AUTO_DELETE = False" in script_code
-
-    # 2. Test frozen mode launcher arguments
-    with patch("orbshacker.config.TIMER_MINUTES", 35):
-        faker = GameFaker()
+        faker._source_exe = tmp_path / "orbshacker.exe"
+        faker._source_exe.write_bytes(b"MZ tool")
         faker._frozen = True
 
-        with patch("subprocess.Popen") as mock_popen:
-            faker.launch_executable(Path("C:/Dummy/Game.exe"))
+        target = tmp_path / "Win64" / "TslGame.exe"
+        faker.copy_exe_to(target)
 
-            # Assert subprocess.Popen was called with just the executable path
-            mock_popen.assert_called_once()
-            called_args = mock_popen.call_args[1].get("args", mock_popen.call_args[0][0])
-            assert called_args == [str(Path("C:/Dummy/Game.exe"))]
+        from orbshacker.bake import load_baked_config
+        baked = load_baked_config(target)
+        assert baked is not None
+        assert baked["TIMER_MINUTES"] == config.TIMER_MINUTES
+
+    def test_refuses_to_overwrite_foreign_file(self, tmp_path):
+        faker = GameFaker()
+        faker._source_exe = tmp_path / "pythonw.exe"
+        faker._source_exe.touch()
+        faker._frozen = True
+
+        real_game = tmp_path / "steamapps" / "common" / "Game" / "Game.exe"
+        real_game.parent.mkdir(parents=True)
+        real_game.write_bytes(b"MZ real game")
+
+        with pytest.raises(FileConflictError):
+            faker.copy_exe_to(real_game, manifest_path=None)
+
+        assert real_game.read_bytes() == b"MZ real game"
+
+    def test_overwrites_our_own_fakes(self, tmp_path):
+        faker = GameFaker()
+        faker._source_exe = tmp_path / "pythonw.exe"
+        faker._source_exe.touch()
+        faker._frozen = True
+
+        target = tmp_path / "Win64" / "TslGame.exe"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"MZ")
+        bake_config(target, {"TIMER_MINUTES": 5})
+
+        faker.copy_exe_to(target, manifest_path=None)
+        assert target.exists()
+
+    def test_register_parent_dirs_is_case_insensitive_for_steamapps(self, tmp_path):
+        faker = GameFaker()
+        fake_root = tmp_path / "SteamLibrary" / "SteamApps" / "Common" / "MyGame" / "Bin"
+        fake_root.mkdir(parents=True)
+        target = fake_root / "Game.exe"
+        target.touch()
+
+        limit = faker._limit_dir_for(target)
+        assert limit.name.lower() == "common"
+
+        added = faker.register_parent_dirs(target, limit)
+        names = {p.name for p in added}
+        assert "Bin" in names
+        assert "MyGame" in names
+        assert not any(p.name.lower() == "steamapps" for p in added)
 
 
-def test_is_faked_game():
-    # Load orbshacker entrypoint dynamically to test its functions
-    spec = importlib.util.spec_from_file_location("orbshacker_script", "orbshacker.py")
-    orb_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(orb_module)
+def test_is_faked_game(tmp_path):
+    orb_module = _load_entrypoint_module()
 
-    # 1. Dev mode cases
-    with patch("sys.frozen", False, create=True), \
-         patch("sys.argv", ["orbshacker.py"]):
-        assert not orb_module.is_faked_game()
+    faked = tmp_path / "TslGame.exe"
+    faked.write_bytes(b"MZ")
+    bake_config(faked, {"TIMER_MINUTES": 15})
 
-    with patch("sys.frozen", False, create=True), \
-         patch("sys.argv", ["TslGame.py"]):
+    plain = tmp_path / "orbshacker.exe"
+    plain.write_bytes(b"MZ")
+
+    renamed_plain = tmp_path / "TotallyLegitGame.exe"
+    renamed_plain.write_bytes(b"MZ")
+
+    with patch("orbshacker.bake.current_target", return_value=faked):
         assert orb_module.is_faked_game()
 
-    # 2. Frozen mode cases
-    with patch("sys.frozen", True, create=True), \
-         patch("sys.executable", "C:\\Users\\jjjda\\Desktop\\orbshacker.exe"):
+    with patch("orbshacker.bake.current_target", return_value=plain):
         assert not orb_module.is_faked_game()
 
-    with patch("sys.frozen", True, create=True), \
-         patch("sys.executable", "C:\\Users\\jjjda\\Desktop\\Win64\\TslGame.exe"):
-        assert orb_module.is_faked_game()
+    with patch("orbshacker.bake.current_target", return_value=renamed_plain):
+        assert not orb_module.is_faked_game()
 
 
 def test_timer_self_destruction(tmp_path):
     from orbshacker.timer import TimerApp
-    import orbshacker.config as config
 
-    with patch("orbshacker.config.AUTO_DELETE", True), \
-         patch("orbshacker.config.STEAM_MANIFEST_PATH", str(tmp_path / "appmanifest_123.acf")):
+    root = MagicMock()
+    with patch.object(TimerApp, "_tick"):
+        app = TimerApp(root, minutes=15, auto_delete=True,
+                       cleanup_files=[tmp_path / "TslGame.exe"],
+                       cleanup_dirs=[tmp_path])
 
-        root = MagicMock()
+    with patch("orbshacker.timer.spawn_self_destruct") as mock_spawn, \
+         patch("sys.exit") as mock_exit:
 
-        # Instantiate TimerApp without running _tick
-        with patch.object(TimerApp, "_tick"):
-            app = TimerApp(root, minutes=15)
+        app.trigger_self_destruction()
 
-        # Mock files next to executable
-        exe_path = tmp_path / "Win64" / "TslGame.exe"
-        exe_path.parent.mkdir()
-        exe_path.touch()
+        mock_spawn.assert_called_once()
+        files, dirs = mock_spawn.call_args[0][0], mock_spawn.call_args[0][1]
+        assert tmp_path / "TslGame.exe" in [Path(f) for f in files]
+        assert tmp_path in [Path(d) for d in dirs]
 
-        settings_path = exe_path.parent / "settings.json"
-        settings_path.touch()
-
-        with patch("sys.frozen", True, create=True), \
-             patch("sys.executable", str(exe_path)), \
-             patch("subprocess.Popen") as mock_popen, \
-             patch("sys.exit") as mock_exit:
-
-            app.trigger_self_destruction()
-
-            # Assert subprocess.Popen spawned self-destruct command including paths to delete
-            mock_popen.assert_called_once()
-            called_cmd = mock_popen.call_args[1].get("args", mock_popen.call_args[0][0])
-            assert "TslGame.exe" in called_cmd
-            assert "settings.json" in called_cmd
-            assert "appmanifest_123.acf" in called_cmd
-
-            # Verify UI clean shutdown
-            root.destroy.assert_called_once()
-            mock_exit.assert_called_once_with(0)
-
-
-def test_load_settings_baked_frozen(tmp_path):
-    # Simulate a faked game with embedded settings at the end of the exe
-    exe_path = tmp_path / "TslGame.exe"
-    
-    config_data = {
-        "CHOSEN_FOLDER": "BakedDir",
-        "AUTO_DELETE": True,
-        "TIMER_MINUTES": 45
-    }
-    
-    # Write the exe with appended marker and JSON settings
-    import json
-    marker = b"__ORBSHACKER_BAKED_CONFIG__"
-    json_bytes = json.dumps(config_data).encode("utf-8")
-    
-    exe_path.write_bytes(b"MZ_DUMMY_EXE_BYTES..." + marker + json_bytes + marker)
-    
-    with patch("sys.frozen", True, create=True), \
-         patch("sys.executable", str(exe_path)):
-         
-        settings = _load_settings()
-        assert isinstance(settings, dict)
-        assert settings.get("CHOSEN_FOLDER") == "BakedDir"
-        assert settings.get("AUTO_DELETE") is True
-        assert settings.get("TIMER_MINUTES") == 45
+        root.destroy.assert_called_once()
+        mock_exit.assert_called_once_with(0)

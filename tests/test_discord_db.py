@@ -103,3 +103,84 @@ class TestFilterWin32Exes:
         exes = db.get_all_executables(games[0])
         assert exes == ["GameSpecial/Bin/Launch.exe"]
 
+
+class TestSkipPatterns:
+    def _game(self, *names):
+        return {
+            "id": "1",
+            "name": "X",
+            "executables": [{"os": "win32", "name": n} for n in names],
+        }
+
+    def test_skips_known_noise(self):
+        db = _make_db_with_games([])
+        game = self._game(
+            "FortniteLauncher.exe",
+            "Unins000.exe",
+            "UnityCrashHandler64.exe",
+            "BugReport.exe",
+            "Setup.exe",
+            "Game_BE.exe",
+            "Game_EAC.exe",
+            "GameUpdater.exe",
+        )
+        assert db.get_all_executables(game, skip_patterns=True) == []
+
+    def test_keeps_real_game_names(self):
+        db = _make_db_with_games([])
+        game = self._game(
+            "CrashBandicoot4.exe",
+            "UpdateTheGame.exe",
+            "RocketLeague.exe",
+            "ReportOfTheWeek.exe",
+            "InstallerSimulator.exe",
+            "SetupQuest.exe",
+        )
+        kept = db.get_all_executables(game, skip_patterns=True)
+        assert "CrashBandicoot4.exe" in kept
+        assert "UpdateTheGame.exe" in kept
+        assert "RocketLeague.exe" in kept
+        assert "ReportOfTheWeek.exe" in kept
+
+    def test_primary_exe_prefers_real_game_over_noise(self):
+        db = _make_db_with_games([])
+        game = self._game("GameLauncher.exe", "TslGame.exe")
+        assert db.get_win32_executable(game) == "TslGame.exe"
+
+    def test_skip_patterns_disabled_keeps_everything(self):
+        db = _make_db_with_games([])
+        game = self._game("GameLauncher.exe", "TslGame.exe")
+        assert len(db.get_all_executables(game, skip_patterns=False)) == 2
+
+
+class TestValidateGames:
+    def test_rejects_non_list_payload(self):
+        import pytest
+
+        from orbshacker.discord_db import _validate_games
+        from orbshacker.errors import DatabaseLoadError
+
+        with pytest.raises(DatabaseLoadError):
+            _validate_games({"unexpected": "shape"})
+
+    def test_rejects_empty_payload(self):
+        import pytest
+
+        from orbshacker.discord_db import _validate_games
+        from orbshacker.errors import DatabaseLoadError
+
+        with pytest.raises(DatabaseLoadError):
+            _validate_games([])
+
+    def test_filters_entries_without_id_or_name(self):
+        from orbshacker.discord_db import _validate_games
+
+        games = _validate_games([
+            {"id": "1", "name": "Good"},
+            {"id": "", "name": "NoId"},
+            {"id": "2"},
+            "not-a-dict",
+            {"id": "3", "name": "AlsoGood"},
+        ])
+        assert [g["id"] for g in games] == ["1", "3"]
+

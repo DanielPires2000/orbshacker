@@ -140,3 +140,5 @@ Win64/
 !exe.exe
 .backups/
 settings.py
+settings.json
+orbshacker/_version.py

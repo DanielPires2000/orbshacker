@@ -1,132 +1,180 @@
 """
 orbshacker – central configuration.
 
-Reads user-editable values from the root-level ``settings.py``.
-If a value is missing there, the default defined below is used.
-Internal-only constants (API URLs, headers, timeouts) live here
-and are NOT exposed in settings.py.
+Reads user-editable values from ``settings.json`` (or the legacy root-level
+``settings.py``) and validates every one of them. A missing or invalid value
+falls back to the default defined in ``DEFAULTS`` – the single source of truth
+for all settings.
+
+Internal-only constants (API URLs, headers, timeouts) live here and are NOT
+exposed in settings.py.
+
+Nothing in this module writes to disk or spawns subprocesses at import time:
+``ensure_user_settings()`` is called explicitly from ``main()``, and the app
+version is resolved lazily on first access.
 """
 
-import importlib.util
 import json
-import shutil
-import sys
-from pathlib import Path
 import subprocess
-from typing import TypeVar, cast
+import sys
+import warnings
+from pathlib import Path
+from typing import Any
 
-from . import _version as _build_version
+from .bake import is_faked_game
 from .path_utils import sanitize_relative_path
 
-T = TypeVar("T")
+try:
+    from . import _version as _build_version
+except ImportError:
+    _build_version = None
+
+DEFAULTS: dict[str, Any] = {
+    "CHOSEN_FOLDER": "Desktop",
+    "FAKE_EXE_DIR": "Win64",
+    "AUTO_DELETE_ON_TIMER_END": True,
+    "AUTO_DELETE_ON_EXIT": False,
+    "TIMER_MINUTES": 15,
+    "MAX_SEARCH_RESULTS": 20,
+    "STEAM_MANIFEST_PATH": None,
+}
+
+LEGACY_KEYS = {"AUTO_DELETE": "AUTO_DELETE_ON_TIMER_END"}
+
+
+def _coerce_bool(value: Any, default: bool, name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("true", "yes", "on", "1"):
+            return True
+        if lowered in ("false", "no", "off", "0"):
+            return False
+    warnings.warn(f"settings: {name}={value!r} is not a boolean, using default {default}")
+    return default
+
+
+def _coerce_int(value: Any, default: int, name: str, minimum: int | None = None) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        warnings.warn(f"settings: {name}={value!r} is not a number, using default {default}")
+        return default
+    if isinstance(value, float) and not value.is_integer():
+        warnings.warn(f"settings: {name}={value!r} is not a whole number, using default {default}")
+        return default
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        warnings.warn(f"settings: {name}={value!r} is not a number, using default {default}")
+        return default
+    if minimum is not None and result < minimum:
+        warnings.warn(f"settings: {name}={result} is below {minimum}, using default {default}")
+        return default
+    return result
+
+
+def _coerce_str(value: Any, default: str, name: str) -> str:
+    if isinstance(value, str):
+        return value
+    warnings.warn(f"settings: {name}={value!r} is not a string, using default {default}")
+    return default
+
+
+def _coerce_optional_path(value: Any, name: str) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value or None
+    warnings.warn(f"settings: {name}={value!r} is not a path string, using default None")
+    return None
+
 
 def _get_default_json_content() -> str:
-    desktop_path = Path.home() / "Desktop"
-    desktop_str = str(desktop_path).replace("\\", "/")
     content = {
-        "CHOSEN_FOLDER": desktop_str,
-        "AUTO_DELETE": False,
-        "TIMER_MINUTES": 15
+        "CHOSEN_FOLDER": str(Path.home() / "Desktop").replace("\\", "/"),
+        "AUTO_DELETE_ON_TIMER_END": DEFAULTS["AUTO_DELETE_ON_TIMER_END"],
+        "AUTO_DELETE_ON_EXIT": DEFAULTS["AUTO_DELETE_ON_EXIT"],
+        "TIMER_MINUTES": DEFAULTS["TIMER_MINUTES"],
     }
     return json.dumps(content, indent=2)
 
-def _is_faked_game() -> bool:
-    """Check if the currently running executable/script is a faked game copy."""
-    if getattr(sys, "frozen", False):
-        name = Path(sys.executable).name.lower()
-        return name != "orbshacker.exe"
-    else:
-        name = Path(sys.argv[0]).name.lower()
-        return name not in ("orbshacker.py", "__main__.py") and "pytest" not in name
 
 def _load_embedded_settings() -> dict | None:
     if not getattr(sys, "frozen", False):
         return None
-    try:
-        exe_path = Path(sys.executable)
-        if not exe_path.exists():
-            return None
-        with open(exe_path, "rb") as f:
-            # Seek to end and read up to 65536 bytes
-            f.seek(0, 2)
-            file_size = f.tell()
-            read_size = min(file_size, 65536)
-            f.seek(file_size - read_size)
-            chunk = f.read(read_size)
-        
-        marker = b"__ORBSHACKER_BAKED_CONFIG__"
-        if marker in chunk:
-            parts = chunk.split(marker)
-            if len(parts) >= 3:
-                json_bytes = parts[-2]
-                return json.loads(json_bytes.decode("utf-8"))
-    except Exception:
-        pass
-    return None
+    from .bake import load_baked_config
+
+    return load_baked_config(Path(sys.executable))
+
 
 def _load_settings():
-    # 1. Try loading embedded settings from the executable
     embedded = _load_embedded_settings()
     if embedded is not None:
         return embedded
 
-    # 2. Determine the path of settings.json
     if getattr(sys, "frozen", False):
-        exe_dir = Path(sys.executable).parent
-        json_path = exe_dir / "settings.json"
-        
-        # If settings.json doesn't exist, create it from default template
-        # ONLY if we are the main application (not a faked game)
-        if not _is_faked_game() and not json_path.exists():
-            try:
-                json_path.write_text(_get_default_json_content(), encoding="utf-8")
-            except Exception:
-                pass
+        json_path = Path(sys.executable).parent / "settings.json"
     else:
-        # Development mode
-        dev_dir = Path(__file__).resolve().parents[1]
-        json_path = dev_dir / "settings.json"
+        json_path = Path(__file__).resolve().parents[1] / "settings.json"
 
-    # 3. Try loading settings.json
     if json_path.exists():
         try:
             with open(json_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
-            pass
-
-    # 4. Fallback to settings.py (backward compatibility)
-    if getattr(sys, "frozen", False):
-        # Look for settings.py next to the exe
-        exe_dir = Path(sys.executable).parent
-        settings_path = exe_dir / "settings.py"
-        if settings_path.exists():
-            try:
-                spec = importlib.util.spec_from_file_location("settings", str(settings_path))
-                if spec and spec.loader:
-                    module = importlib.util.module_from_spec(spec)
-                    sys.modules["settings"] = module
-                    spec.loader.exec_module(module)
-                    return module
-            except Exception:
-                pass
+            warnings.warn(f"settings: could not parse {json_path}, using defaults")
 
     try:
-        import settings as _user  # root-level settings.py
+        import settings as _user
         return _user
     except ImportError:
-        return None  # no user settings file – use all defaults
+        return None
+
 
 _user = _load_settings()
 
+_MINIMUMS = {"TIMER_MINUTES": 1, "MAX_SEARCH_RESULTS": 1}
 
-def _get(name: str, default: T) -> T:
-    """Return a value from the user settings, falling back to *default*."""
+
+def _get_validated(name: str) -> Any:
+    """Return a validated user value for *name*, falling back to DEFAULTS."""
+    default = DEFAULTS[name]
     if _user is None:
         return default
     if isinstance(_user, dict):
-        return cast(T, _user.get(name, default))
-    return cast(T, getattr(_user, name, default))
+        raw = _user.get(name)
+        if raw is None:
+            legacy = next((k for k, v in LEGACY_KEYS.items() if v == name), None)
+            if legacy is not None:
+                raw = _user.get(legacy)
+    else:
+        raw = getattr(_user, name, None)
+    if raw is None:
+        return default
+    if name == "CHOSEN_FOLDER":
+        return raw if isinstance(raw, (str, Path)) else default
+    if isinstance(default, bool):
+        return _coerce_bool(raw, default, name)
+    if isinstance(default, int):
+        return _coerce_int(raw, default, name, minimum=_MINIMUMS.get(name))
+    if isinstance(default, str):
+        return _coerce_str(raw, default, name)
+    return _coerce_optional_path(raw, name)
+
+
+def ensure_user_settings() -> None:
+    """Create a default settings.json next to the executable (frozen app only)."""
+    if not getattr(sys, "frozen", False) or is_faked_game():
+        return
+    json_path = Path(sys.executable).parent / "settings.json"
+    if json_path.exists():
+        return
+    try:
+        json_path.write_text(_get_default_json_content(), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _git_version() -> str | None:
@@ -153,38 +201,46 @@ def _git_version() -> str | None:
 
 
 def _resolve_version() -> str:
-    """Resolve the app version from build metadata or git tags."""
     built_version = getattr(_build_version, "VERSION", None)
     if built_version:
         return str(built_version)
-
     git_version = _git_version()
     if git_version:
         return git_version
-
     return "0.0.0"
 
 
 # ── App identity ──────────────────────────────────────────────────────────────
-VERSION   = _resolve_version()
 DEVELOPER = "Strykey / Daniel Pires / Pannenkoekisus"
+
+_version_cache: str | None = None
+
+
+def __getattr__(name: str) -> Any:
+    global _version_cache
+    if name == "VERSION":
+        if _version_cache is None:
+            _version_cache = _resolve_version()
+        return _version_cache
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # ── GitHub repo ───────────────────────────────────────────────────────────────
 GITHUB_REPO_OWNER = "DanielPires2000"
-GITHUB_REPO_NAME  = "orbshacker"
-REPO_URL          = f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}"
+GITHUB_REPO_NAME = "orbshacker"
+REPO_URL = f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}"
 
 # ── Network endpoints (internal – not in settings.py) ─────────────────────────
-DISCORD_API_URL        = "https://discord.com/api/v9/applications/detectable"
-GITHUB_BACKUP_URL      = (
+DISCORD_API_URL = "https://discord.com/api/v9/applications/detectable"
+GITHUB_BACKUP_URL = (
     "https://gist.githubusercontent.com/Cynosphere/"
     "c1e77f77f0e565ddaac2822977961e76/raw/gameslist.json"
 )
-STEAMCMD_API_URL       = "https://api.steamcmd.net/v1/info"
+STEAMCMD_API_URL = "https://api.steamcmd.net/v1/info"
 STEAM_STORE_SEARCH_URL = "https://store.steampowered.com/api/storesearch"
 
 # ── HTTP settings (internal) ─────────────────────────────────────────────────
-REQUEST_TIMEOUT      = 10
+REQUEST_TIMEOUT = 10
 REQUEST_TIMEOUT_LONG = 20
 
 DISCORD_HEADERS = {
@@ -193,28 +249,31 @@ DISCORD_HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
     ),
-    "Accept":          "application/json",
+    "Accept": "application/json",
     "Accept-Language": "en-US,en;q=0.9",
-    "Referer":         "https://discord.com/",
-    "Origin":          "https://discord.com",
+    "Referer": "https://discord.com/",
+    "Origin": "https://discord.com",
 }
 
-# ── UI / UX (user-editable via settings.py or settings.json) ──────────────────
-SLEEP_SHORT        = 1.0
-SLEEP_LONG         = 2.0
-FAKE_EXE_DIR       = sanitize_relative_path(_get("FAKE_EXE_DIR", "Win64"))
-MAX_SEARCH_RESULTS = 20
-AUTO_DELETE        = _get("AUTO_DELETE",        False)
-TIMER_MINUTES      = _get("TIMER_MINUTES",      15)
-STEAM_MANIFEST_PATH = _get("STEAM_MANIFEST_PATH", None)
+# ── UI / UX (user-editable via settings.json or settings.py) ──────────────────
+SLEEP_SHORT = 1.0
+SLEEP_LONG = 2.0
+FAKE_EXE_DIR = sanitize_relative_path(_get_validated("FAKE_EXE_DIR"))
+MAX_SEARCH_RESULTS = _get_validated("MAX_SEARCH_RESULTS")
+AUTO_DELETE_ON_TIMER_END = _get_validated("AUTO_DELETE_ON_TIMER_END")
+AUTO_DELETE_ON_EXIT = _get_validated("AUTO_DELETE_ON_EXIT")
+TIMER_MINUTES = _get_validated("TIMER_MINUTES")
+STEAM_MANIFEST_PATH = _get_validated("STEAM_MANIFEST_PATH")
 
-# Resolve CHOSEN_FOLDER as a Path object
-default_folder = str(Path.home() / "Desktop")
-chosen_folder_val = _get("CHOSEN_FOLDER", default_folder)
-if isinstance(chosen_folder_val, str):
-    if chosen_folder_val.strip() == "Desktop" or not chosen_folder_val.strip():
-        CHOSEN_FOLDER = Path.home() / "Desktop"
-    else:
-        CHOSEN_FOLDER = Path(chosen_folder_val)
-else:
-    CHOSEN_FOLDER = chosen_folder_val
+
+def _resolve_chosen_folder() -> Path:
+    raw = _get_validated("CHOSEN_FOLDER")
+    if isinstance(raw, Path):
+        return raw
+    value = raw if isinstance(raw, str) else DEFAULTS["CHOSEN_FOLDER"]
+    if value.strip() in ("Desktop", ""):
+        return Path.home() / "Desktop"
+    return Path(value)
+
+
+CHOSEN_FOLDER = _resolve_chosen_folder()

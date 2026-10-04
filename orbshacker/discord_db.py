@@ -2,18 +2,23 @@
 discord_db.py – DiscordGamesDB class and database search mode.
 """
 
-from typing import TypedDict
+import re
 import time
+from typing import TypedDict
 
 from . import config
-from .path_utils import sanitize_relative_path
+from .errors import DatabaseLoadError, NetworkError
 from .faker import GameFaker
-from .ui import (
-    Colors, print_color, print_boxed_title,
-    loading_animation, ask_confirm,
-)
 from .net import fetch_json
-from .errors import NetworkError, DatabaseLoadError
+from .path_utils import sanitize_relative_path
+from .ui import (
+    Colors,
+    ask_confirm,
+    loading_animation,
+    pause,
+    print_boxed_title,
+    print_color,
+)
 
 
 class ExecutableEntry(TypedDict, total=False):
@@ -26,6 +31,16 @@ class GameRecord(TypedDict, total=False):
     name: str
     aliases: list[str]
     executables: list[ExecutableEntry]
+
+
+def _validate_games(data) -> list[GameRecord]:
+    """Accept only a list of game dicts with an id and a name."""
+    if not isinstance(data, list):
+        raise DatabaseLoadError(f"Games database has unexpected shape: {type(data).__name__}")
+    games = [g for g in data if isinstance(g, dict) and g.get("id") and g.get("name")]
+    if not games:
+        raise DatabaseLoadError("Games database is empty or malformed.")
+    return games
 
 
 class DiscordGamesDB:
@@ -48,24 +63,26 @@ class DiscordGamesDB:
 
     def _load_from_discord_api(self) -> bool:
         try:
-            loading_animation("Connecting to Discord API", 1.0)
-            self.games = fetch_json(config.DISCORD_API_URL, headers=config.DISCORD_HEADERS)
+            loading_animation("Connecting to Discord API", 0.5)
+            data = fetch_json(config.DISCORD_API_URL, headers=config.DISCORD_HEADERS)
+            self.games = _validate_games(data)
             self.source = "Discord Official API"
             print_color(f"[OK] Loaded {len(self.games)} games from Discord API", Colors.GREEN, bold=True)
             print_color("[*] Using LIVE database (fresh from Discord's servers)", Colors.CYAN)
             return True
-        except NetworkError as e:
+        except (NetworkError, DatabaseLoadError) as e:
             print_color(f"[!] Discord API error: {e}", Colors.YELLOW)
             return False
 
     def _load_from_github(self) -> bool:
         try:
-            loading_animation("Fetching GitHub backup", 1.0)
-            self.games = fetch_json(config.GITHUB_BACKUP_URL, timeout=config.REQUEST_TIMEOUT_LONG)
+            loading_animation("Fetching GitHub backup", 0.5)
+            data = fetch_json(config.GITHUB_BACKUP_URL, timeout=config.REQUEST_TIMEOUT_LONG)
+            self.games = _validate_games(data)
             self.source = "GitHub Backup"
             print_color(f"[OK] Loaded {len(self.games)} games from GitHub", Colors.GREEN, bold=True)
             return True
-        except NetworkError as e:
+        except (NetworkError, DatabaseLoadError) as e:
             print_color(f"[ERROR] GitHub backup failed: {e}", Colors.RED)
             return False
 
@@ -88,16 +105,24 @@ class DiscordGamesDB:
         return merged[:config.MAX_SEARCH_RESULTS]
 
     # ── executable helpers ────────────────────────────────────────────────────
-    _SKIP_EXE_PATTERNS = [
-        '_be.exe', '_eac.exe', 'launcher', 'unins',
-        'crash', 'report', 'update', 'setup', 'install',
+    # Anchored on suffix/prefix/compound so real game names like
+    # "CrashBandicoot4.exe" or "UpdateTheGame.exe" are never skipped.
+    _SKIP_EXE_RES = [
+        re.compile(r"(_be|_eac)\.exe$"),
+        re.compile(r"(launcher|updater|installer|setup)\.exe$"),
+        re.compile(r"^(setup|unins)\d*\.exe$"),
+        re.compile(r"crash(handler|report)|bugreport|errorreport"),
     ]
+
+    def _is_skipped_exe(self, name: str) -> bool:
+        lowered = name.lower()
+        return any(pattern.search(lowered) for pattern in self._SKIP_EXE_RES)
 
     def _filter_win32_exes(self, game: GameRecord, skip_patterns: bool = True) -> list[str]:
         result: list[str] = []
         seen: set[str] = set()
         for exe in game.get('executables', []):
-            if exe.get('os') != 'win32':
+            if not isinstance(exe, dict) or exe.get('os') != 'win32':
                 continue
             name = exe.get('name', '')
             if name.startswith('>'):
@@ -105,7 +130,7 @@ class DiscordGamesDB:
             name = sanitize_relative_path(name)
             if not name or name in seen:
                 continue
-            if skip_patterns and any(p in name.lower() for p in self._SKIP_EXE_PATTERNS):
+            if skip_patterns and self._is_skipped_exe(name):
                 continue
             seen.add(name)
             result.append(name)
@@ -115,8 +140,8 @@ class DiscordGamesDB:
         candidates = self._filter_win32_exes(game, skip_patterns=True)
         return candidates[0] if candidates else None
 
-    def get_all_executables(self, game: GameRecord) -> list[str]:
-        return self._filter_win32_exes(game, skip_patterns=False)
+    def get_all_executables(self, game: GameRecord, skip_patterns: bool = False) -> list[str]:
+        return self._filter_win32_exes(game, skip_patterns=skip_patterns)
 
 
 # ── Interactive UI ────────────────────────────────────────────────────────────
@@ -225,6 +250,6 @@ def database_mode(db: DiscordGamesDB, faker: GameFaker) -> None:
         print_color("\n[OK] Setup complete! Discord should detect the game.", Colors.GREEN, bold=True)
         print_color("[!] IMPORTANT: Discord MUST be running for the spoofing to work", Colors.YELLOW)
         print_color("[*] Keep the process running until quest is complete", Colors.CYAN)
-        print_color("[*] TIP: Run this tool again to emulate another game simultaneously!", Colors.MAGENTA)
+        print_color("[*] TIP: Launch another game from the menu to emulate it simultaneously!", Colors.MAGENTA)
 
-    input(f"\n{Colors.GRAY}Press Enter to continue...{Colors.RESET}")
+    pause()

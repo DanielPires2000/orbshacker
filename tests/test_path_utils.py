@@ -1,9 +1,7 @@
 """Tests for path_utils.py – sanitization of Windows filenames and paths."""
 
-import pytest
 from orbshacker.path_utils import (
     sanitize_filename,
-    sanitize_path_segment,
     sanitize_relative_path,
 )
 
@@ -19,7 +17,7 @@ class TestSanitizeFilename:
         assert sanitize_filename("Game: Subtitle") == "Game Subtitle"
         assert sanitize_filename('Game "Special" Edition') == "Game Special Edition"
         assert sanitize_filename("What <is> | this ? *") == "What is  this"
-        assert sanitize_filename("slash/backslash\\test") == "slashbackslashvest" or "slash" in sanitize_filename("slash/backslash\\test")
+        assert sanitize_filename("slash/backslash\\test") == "slashbackslashtest"
 
     def test_strips_trailing_dots_and_spaces(self):
         assert sanitize_filename("game.exe.") == "game.exe"

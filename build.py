@@ -8,9 +8,9 @@ This script:
 3. Invokes PyInstaller with the proper parameters to build a single executable.
 """
 
-import os
-import sys
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -32,11 +32,16 @@ def get_git_version() -> str:
 
 
 def main():
+    # 0. Make sure settings.py exists (untracked; generated from the example)
+    if not Path("settings.py").exists():
+        print("[*] Generating settings.py from settings.example.py")
+        shutil.copyfile("settings.example.py", "settings.py")
+
     # 1. Resolve version
     version = get_git_version()
     print(f"[*] Resolving version from Git: {version}")
 
-    # 2. Write to orbshacker/_version.py
+    # 2. Write to orbshacker/_version.py (kept out of git)
     version_file = Path("orbshacker") / "_version.py"
     print(f"[*] Baking version into: {version_file}")
     version_file.write_text(f'VERSION = "{version}"\n', encoding="utf-8")

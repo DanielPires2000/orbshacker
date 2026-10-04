@@ -6,13 +6,12 @@ Usage:
     python orbshacker.py         (main menu)
     python -m orbshacker         (package-style)
 
-When launched with --timer-mode (by a renamed copy of itself),
-it runs the 15-minute timer instead of the main menu.
+A renamed copy of itself carrying a baked config (a faked game) runs the
+countdown timer instead of the main menu, as does ``--timer-mode``.
 """
 
-import sys
 import os
-from pathlib import Path
+import sys
 
 # ── Safety: redirect stdio to devnull when running without a console ──────────
 # PyInstaller --noconsole (or pythonw) sets sys.stdout/stderr/stdin to None.
@@ -26,27 +25,20 @@ if sys.stdin is None:
 
 
 def is_faked_game() -> bool:
-    """Check if the currently running executable/script is a faked game copy."""
-    if getattr(sys, "frozen", False):
-        name = Path(sys.executable).name.lower()
-        return name != "orbshacker.exe"
-    else:
-        name = Path(sys.argv[0]).name.lower()
-        return name not in ("orbshacker.py", "__main__.py") and "pytest" not in name
+    """A process is a faked game only if it carries an orbshacker baked config."""
+    from orbshacker.bake import is_faked_game as _is_faked
+    return _is_faked()
+
 
 def show_console() -> None:
     """Allocate and show a Windows console window if running on Windows."""
     if sys.platform == "win32":
         try:
             import ctypes
-            # Only allocate a console if we don't have one already
             if not ctypes.windll.kernel32.GetConsoleWindow():
-                # Try to attach to parent console first
                 if not ctypes.windll.kernel32.AttachConsole(-1):
-                    # Otherwise, allocate a new console window
                     ctypes.windll.kernel32.AllocConsole()
-                
-                # Reopen standard streams
+
                 sys.stdout = open("CONOUT$", "w", encoding="utf-8")
                 sys.stderr = open("CONOUT$", "w", encoding="utf-8")
                 sys.stdin = open("CONIN$", "r", encoding="utf-8")
@@ -56,18 +48,12 @@ def show_console() -> None:
 
 if __name__ == "__main__":
     if is_faked_game() or "--timer-mode" in sys.argv:
-        from orbshacker.timer import run_timer
-        try:
-            idx = sys.argv.index("--timer-mode")
-            minutes = int(sys.argv[idx + 1])
-        except (ValueError, IndexError):
-            from orbshacker import config
-            minutes = config.TIMER_MINUTES
-        run_timer(minutes)
+        from orbshacker.timer import parse_timer_args, run_timer
+        run_timer(parse_timer_args(sys.argv))
     else:
         show_console()
         from orbshacker.main import main
-        from orbshacker.ui import print_color, Colors
+        from orbshacker.ui import Colors, print_color
 
         try:
             main()

@@ -3,17 +3,17 @@ main.py – Application entry point and main loop.
 """
 
 import os
-import sys
 import subprocess
+import sys
 import time
 
 from . import config
-from .ui import Colors, print_color, print_banner, print_menu, show_credits
-from .faker import GameFaker, manual_mode
 from .discord_db import DiscordGamesDB, database_mode
-from .steam import steam_quest_mode
-from .updater import auto_update
 from .errors import DatabaseLoadError
+from .faker import GameFaker, manual_mode
+from .steam import steam_quest_mode
+from .ui import Colors, print_banner, print_color, print_menu, show_credits
+from .updater import auto_update
 
 
 def main() -> None:
@@ -22,6 +22,8 @@ def main() -> None:
         auto_update()
     except Exception:
         pass
+
+    config.ensure_user_settings()
 
     print_banner()
     print_color("Initializing orbshacker...", Colors.CYAN)
@@ -62,7 +64,7 @@ def main() -> None:
                 elif choice == '4':
                     show_credits()
                 elif choice == '5':
-                    print_color(f"\n[*] Thanks for using orbshacker!", Colors.CYAN, bold=True)
+                    print_color("\n[*] Thanks for using orbshacker!", Colors.CYAN, bold=True)
                     print_color(f"[*] Developed by {config.DEVELOPER}", Colors.GRAY)
                     print_color("\n[*] May your orbs be plentiful!", Colors.MAGENTA)
                     break
@@ -70,7 +72,7 @@ def main() -> None:
                     print_color("\n[ERROR] Invalid option - try 1, 2, 3, 4 or 5", Colors.RED)
                     time.sleep(config.SLEEP_SHORT)
 
-            except KeyboardInterrupt:
+            except (KeyboardInterrupt, EOFError):
                 print_color("\n\n[!] Interrupted by user", Colors.YELLOW)
                 print_color("[*] Thanks for using orbshacker!\n", Colors.CYAN)
                 break

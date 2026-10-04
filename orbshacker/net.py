@@ -2,8 +2,9 @@
 net.py – Shared HTTP helpers.
 """
 
-import requests
 from typing import Any, Mapping
+
+import requests
 
 from . import config
 from .errors import NetworkError
@@ -21,9 +22,9 @@ def fetch_json(
             url,
             headers=dict(headers or {}),
             params=dict(params or {}),
-            timeout=timeout or config.REQUEST_TIMEOUT,
+            timeout=config.REQUEST_TIMEOUT if timeout is None else timeout,
         )
         resp.raise_for_status()
         return resp.json()
-    except requests.RequestException as exc:
+    except (requests.RequestException, ValueError) as exc:
         raise NetworkError(f"Request to {url} failed: {exc}") from exc

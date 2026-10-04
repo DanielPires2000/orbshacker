@@ -1,100 +1,52 @@
 """
 faker.py – GameFaker class, manual_mode, and executable launching.
 
-In frozen (.exe) mode:   copies orbshacker.exe itself → GameName.exe (--timer-mode)
-In source mode:           copies pythonw.exe → GameName.exe + _orbshacker_timer.pyw
+In frozen (.exe) mode:  copies orbshacker.exe itself -> GameName.exe (config baked in)
+In source mode:         copies pythonw.exe -> GameName.exe + _<stem>_orbshacker_timer.pyw
 """
 
+import json
 import os
-import sys
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 from . import config
-from .path_utils import sanitize_relative_path, sanitize_filename
+from .bake import MARKER, bake_config, has_baked_config
+from .errors import FileConflictError
+from .path_utils import sanitize_relative_path
 from .ui import (
-    Colors, print_color, print_boxed_title,
-    loading_animation, ask_confirm,
+    Colors,
+    ask_confirm,
+    loading_animation,
+    pause,
+    print_boxed_title,
+    print_color,
 )
 
-# Timer code embedded for source mode – written as a standalone .pyw file
-# so that the renamed Python interpreter can run it without any package dependency.
-_TIMER_PYW_CODE = '''\
-import tkinter as tk
-import sys
-import subprocess
-from pathlib import Path
+_SOURCES_FOR_INLINE = ("bake.py", "janitor.py", "timer.py")
 
-# Baked configurations
-AUTO_DELETE = False
-TIMER_MINUTES = 15
-STEAM_MANIFEST_PATH = None
 
-class TimerApp:
-    def __init__(self, root, minutes=15):
-        root.title("Timer")
-        root.geometry("400x250")
-        root.resizable(False, False)
-        root.configure(bg="#1a1a1a")
-        self.root = root
-        self.remaining = minutes * 60
-        self.label = tk.Label(root, text=f"{minutes:02d}:00", font=("Consolas", 56, "bold"),
-                              fg="#e0e0e0", bg="#1a1a1a")
-        self.label.pack(expand=True)
-        self.status = tk.Label(root, text="Running", font=("Segoe UI", 10),
-                               fg="#666666", bg="#1a1a1a")
-        self.status.pack(side="bottom", pady=20)
-        self._tick()
+def timer_script_for(target_path: Path) -> Path:
+    """Return the per-game timer script path for *target_path*."""
+    return target_path.parent / f"_{target_path.stem}_orbshacker_timer.pyw"
 
-    def _tick(self):
-        m, s = divmod(self.remaining, 60)
-        self.label.config(text=f"{m:02d}:{s:02d}")
-        if self.remaining > 0:
-            self.remaining -= 1
-            self.label.after(1000, self._tick)
-        else:
-            self.label.config(text="00:00", fg="#ff6b6b")
-            self.status.config(text="Complete", fg="#ff6b6b")
-            self.root.update()
-            if AUTO_DELETE:
-                self.trigger_self_destruction()
 
-    def trigger_self_destruction(self):
-        exe_path = Path(sys.executable)
-        script_path = Path(sys.argv[0])
-        dir_path = exe_path.parent
-
-        exe_str = str(exe_path).replace("/", "\\\\")
-        script_str = str(script_path).replace("/", "\\\\")
-        dir_str = str(dir_path).replace("/", "\\\\")
-
-        cmd_parts = [
-            "ping 127.0.0.1 -n 3 > nul",
-            f'del /f /q "{exe_str}" "{script_str}"'
-        ]
-        if STEAM_MANIFEST_PATH:
-            manifest_str = str(Path(STEAM_MANIFEST_PATH)).replace("/", "\\\\")
-            cmd_parts.append(f'del /f /q "{manifest_str}"')
-        cmd_parts.append(f'rmdir "{dir_str}"')
-
-        cmd = " && ".join(cmd_parts)
-        subprocess.Popen(
-            cmd,
-            shell=True,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-        )
-        self.root.destroy()
-        sys.exit(0)
-
-root = tk.Tk()
-TimerApp(root, TIMER_MINUTES)
-root.mainloop()
-'''
+def build_timer_script(config_dict: dict) -> str:
+    """Assemble a standalone timer script with *config_dict* baked in."""
+    parts = [f"ORBSHACKER_BAKED_CONFIG = {config_dict!r}\n\n"]
+    for name in _SOURCES_FOR_INLINE:
+        source_path = Path(__file__).with_name(name)
+        if not source_path.exists():
+            raise RuntimeError(f"cannot inline {name}: source file missing ({source_path})")
+        parts.append(source_path.read_text(encoding="utf-8").rstrip("\n") + "\n\n")
+    payload = json.dumps(config_dict, separators=(",", ":"))
+    parts.append(f"#{MARKER.decode('utf-8')}{payload}{MARKER.decode('utf-8')}\n")
+    script = "".join(parts)
+    compile(script, "<orbshacker_timer>", "exec")
+    return script
 
 
 def _is_frozen() -> bool:
@@ -104,9 +56,8 @@ def _is_frozen() -> bool:
 def _find_source_exe() -> Path:
     """Find the executable to copy for fake game processes."""
     if _is_frozen():
-        return Path(sys.executable)  # copy ourselves
+        return Path(sys.executable)
 
-    # Source mode: prefer the real pythonw.exe from sys.base_prefix to avoid venv launcher stub issues
     base_dir = Path(sys.base_prefix)
     pythonw = base_dir / "pythonw.exe"
     if pythonw.exists():
@@ -115,11 +66,10 @@ def _find_source_exe() -> Path:
     if python.exists():
         return python
 
-    # Fallback to sys.executable's parent
     pythonw_fallback = Path(sys.executable).parent / "pythonw.exe"
     if pythonw_fallback.exists():
         return pythonw_fallback
-    return Path(sys.executable)  # fallback to python.exe
+    return Path(sys.executable)
 
 
 class GameFaker:
@@ -128,6 +78,7 @@ class GameFaker:
         self._source_exe = _find_source_exe()
         self.chosen_path = config.CHOSEN_FOLDER
         self._created_files = []
+        self._shared_files = []
         self._created_dirs = []
         self._processes = []
 
@@ -135,62 +86,134 @@ class GameFaker:
         """Register a file to be deleted on cleanup."""
         self._created_files.append(Path(path))
 
-    def register_parent_dirs(self, path: Path, limit_dir: Path) -> None:
-        """Register parent directories of *path* up to *limit_dir* to check for deletion on cleanup."""
+    def register_shared_file(self, path: Path) -> None:
+        """Register a file shared by several fakes (deleted only on launcher cleanup)."""
+        self._shared_files.append(Path(path))
+
+    def unregister_created_file(self, path: Path) -> None:
+        target = Path(path)
+        self._created_files = [p for p in self._created_files if p != target]
+
+    def register_parent_dirs(self, path: Path, limit_dir: Path) -> list:
+        """Register parent directories of *path* up to *limit_dir*; return the new ones."""
         parent = path.parent
-        limit_dir_res = limit_dir.resolve()
-        while parent.resolve() != limit_dir_res and parent != parent.parent:
+        limit_key = os.path.normcase(str(limit_dir.resolve()))
+        added = []
+        depth = 0
+        while os.path.normcase(str(parent.resolve())) != limit_key and parent != parent.parent and depth < 16:
             if parent not in self._created_dirs:
                 self._created_dirs.append(parent)
+                added.append(parent)
             parent = parent.parent
+            depth += 1
+        return added
 
-    def copy_exe_to(self, target_path: Path) -> None:
-        """Copy the faker executable to *target_path*.
+    def _limit_dir_for(self, target_path: Path) -> Path:
+        parts = str(target_path).replace("\\", "/").split("/")
+        for index in range(len(parts) - 1):
+            if parts[index].lower() == "steamapps" and parts[index + 1].lower() == "common":
+                prefix = "/".join(parts[: index + 2])
+                return Path(prefix.replace("/", os.sep))
+        return self.chosen_path
 
-        In source mode, also creates a ``_orbshacker_timer.pyw`` next to
-        the target so the renamed Python interpreter can run it.
+    def build_baked_config(self, target_exe=None, manifest_path=None, cleanup_dirs=(),
+                           extra_files=(), shared_files=()) -> dict:
+        return {
+            "TARGET_EXE": str(target_exe).replace("\\", "/") if target_exe else None,
+            "TIMER_MINUTES": config.TIMER_MINUTES,
+            "AUTO_DELETE_ON_TIMER_END": config.AUTO_DELETE_ON_TIMER_END,
+            "STEAM_MANIFEST_PATH": str(manifest_path).replace("\\", "/") if manifest_path else None,
+            "CLEANUP_DIRS": [str(d).replace("\\", "/") for d in cleanup_dirs],
+            "EXTRA_FILES": [str(f).replace("\\", "/") for f in extra_files],
+            "SHARED_FILES": [str(f).replace("\\", "/") for f in shared_files],
+            "TK_SUPPORT_DIRS": self._tk_support_dirs(),
+        }
+
+    @staticmethod
+    def _tk_support_dirs() -> list:
+        base = Path(sys.base_prefix) / "tcl"
+        if not base.is_dir():
+            return []
+        return [str(p).replace("\\", "/") for p in sorted(base.iterdir()) if p.is_dir()]
+
+    def copy_exe_to(self, target_path: Path, manifest_path: Path | None = None) -> None:
+        """Copy the faker executable to *target_path* and bake the active config.
+
+        Refuses to overwrite files that were not created by orbshacker so a real
+        game executable is never destroyed.
         """
+        target_path = Path(target_path)
+        existing_script = timer_script_for(target_path)
+        is_ours = has_baked_config(target_path) or existing_script.exists()
+        if target_path.exists() and not is_ours:
+            raise FileConflictError(
+                f"{target_path} already exists and was not created by orbshacker "
+                "(real game executable?); refusing to overwrite"
+            )
+
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(self._source_exe, target_path)
         self.register_created_file(target_path)
 
-        target_path_str = str(target_path).replace("\\", "/")
-        if "steamapps/common" in target_path_str:
-            parts = target_path_str.split("steamapps/common")
-            limit_dir = Path(parts[0] + "steamapps/common")
-        else:
-            limit_dir = self.chosen_path
+        limit_dir = self._limit_dir_for(target_path)
+        cleanup_dirs = self.register_parent_dirs(target_path, limit_dir)
+        shared_files = []
+        if not self._frozen:
+            shared_files = self._copy_python_runtime(target_path.parent)
 
-        self.register_parent_dirs(target_path, limit_dir)
-
-        target_config = {
-            "CHOSEN_FOLDER": str(config.CHOSEN_FOLDER).replace("\\", "/"),
-            "AUTO_DELETE": config.AUTO_DELETE,
-            "TIMER_MINUTES": config.TIMER_MINUTES,
-        }
-        manifest_path = getattr(config, "STEAM_MANIFEST_PATH", None)
-        if manifest_path:
-            target_config["STEAM_MANIFEST_PATH"] = str(manifest_path).replace("\\", "/")
-
-        import json
+        baked = self.build_baked_config(
+            target_exe=target_path,
+            manifest_path=manifest_path,
+            cleanup_dirs=cleanup_dirs,
+            shared_files=shared_files,
+        )
         if self._frozen:
+            bake_config(target_path, baked)
+        else:
+            # Keep the pythonw copy byte-identical (its Authenticode signature
+            # must survive); the per-game script carries the baked config.
+            script = timer_script_for(target_path)
+            script.write_text(build_timer_script(baked), encoding="utf-8")
+            self.register_created_file(script)
+
+    def _copy_python_runtime(self, folder: Path) -> list:
+        """Ensure pythonXY.dll and a ._pth exist beside the fake exe.
+
+        Returns every shared file in place afterwards (created now or by an
+        earlier fake), so any game's cleanup can remove them once it is the
+        last fake in the folder.
+        """
+        version_tag = f"{sys.version_info.major}{sys.version_info.minor}"
+        ensured = []
+
+        target_dll = folder / f"python{version_tag}.dll"
+        source_dll = Path(sys.base_prefix) / target_dll.name
+        if not target_dll.exists() and source_dll.exists():
             try:
-                json_data = json.dumps(target_config).encode("utf-8")
-                marker = b"__ORBSHACKER_BAKED_CONFIG__"
-                with open(target_path, "ab") as f:
-                    f.write(marker + json_data + marker)
+                shutil.copy2(source_dll, target_dll)
+                self.register_shared_file(target_dll)
             except Exception:
                 pass
-        else:
-            timer_script = target_path.parent / "_orbshacker_timer.pyw"
-            if not timer_script.exists():
-                code = _TIMER_PYW_CODE
-                code = code.replace("AUTO_DELETE = False", f"AUTO_DELETE = {config.AUTO_DELETE}")
-                code = code.replace("TIMER_MINUTES = 15", f"TIMER_MINUTES = {config.TIMER_MINUTES}")
-                if manifest_path:
-                    code = code.replace("STEAM_MANIFEST_PATH = None", f"STEAM_MANIFEST_PATH = {repr(str(manifest_path))}")
-                timer_script.write_text(code, encoding="utf-8")
-                self.register_created_file(timer_script)
+        if target_dll.exists():
+            ensured.append(target_dll)
+
+        pth = folder / f"python{version_tag}._pth"
+        if not pth.exists():
+            try:
+                base = Path(sys.base_prefix)
+                lines = [
+                    str(base / "Lib"),
+                    str(base / "DLLs"),
+                    str(folder),
+                ]
+                pth.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                self.register_shared_file(pth)
+            except Exception:
+                pass
+        if pth.exists():
+            ensured.append(pth)
+
+        return ensured
 
     def create_fake_game(self, exe_name: str) -> Path | None:
         """Create fake game executable under Desktop/<FAKE_EXE_DIR>/."""
@@ -199,10 +222,13 @@ class GameFaker:
             exe_name += '.exe'
         target_path = self.chosen_path / config.FAKE_EXE_DIR / exe_name
         try:
-            loading_animation(f"Creating {exe_name.split('/')[-1]}", 0.8)
+            loading_animation(f"Creating {exe_name.split('/')[-1]}", 0.5)
             self.copy_exe_to(target_path)
             print_color(f"[OK] Created: {target_path}", Colors.GREEN, bold=True)
             return target_path
+        except FileConflictError as e:
+            print_color(f"[ERROR] {e}", Colors.RED, bold=True)
+            return None
         except Exception as e:
             print_color(f"[ERROR] Failed to create executable: {e}", Colors.RED, bold=True)
             print_color("[!] Check file permissions or disk space", Colors.YELLOW)
@@ -211,13 +237,13 @@ class GameFaker:
     def launch_executable(self, exe_path: Path) -> bool:
         """Launch the fake game process in background."""
         try:
-            loading_animation("Launching process", 0.8)
+            loading_animation("Launching process", 0.5)
 
             if self._frozen:
                 args = [str(exe_path)]
                 env = None
             else:
-                timer_script = exe_path.parent / "_orbshacker_timer.pyw"
+                timer_script = timer_script_for(exe_path)
                 args = [str(exe_path), str(timer_script)]
                 env = os.environ.copy()
                 base_prefix = Path(sys.base_prefix)
@@ -251,7 +277,7 @@ class GameFaker:
             print_color("[*] Discord should now detect the game (if Discord is running)", Colors.CYAN)
             print_color("[!] IMPORTANT: Discord MUST be running for the spoofing to work", Colors.YELLOW)
             print_color("[*] Wait a few seconds for Discord to scan processes", Colors.GRAY)
-            print_color("[*] TIP: You can run this tool multiple times to emulate multiple games!", Colors.MAGENTA)
+            print_color("[*] TIP: Use the menu again to emulate multiple games at once!", Colors.MAGENTA)
             return True
         except Exception as e:
             print_color(f"[!] Failed to auto-launch: {e}", Colors.YELLOW)
@@ -259,20 +285,18 @@ class GameFaker:
             return False
 
     def cleanup(self) -> None:
-        """Clean up all launched processes and created files if AUTO_DELETE is enabled."""
-        if not config.AUTO_DELETE:
+        """Terminate faked processes and delete created files (AUTO_DELETE_ON_EXIT only)."""
+        if not config.AUTO_DELETE_ON_EXIT:
             return
 
-        print_color("\n[*] AUTO_DELETE enabled. Cleaning up faked processes and files...", Colors.CYAN)
+        print_color("\n[*] AUTO_DELETE_ON_EXIT enabled. Cleaning up faked processes and files...", Colors.CYAN)
 
-        # 1. Terminate all launched processes
         for proc in self._processes:
             try:
                 proc.terminate()
             except Exception:
                 pass
 
-        # Wait a moment for processes to release file handles
         if self._processes:
             time.sleep(1.0)
             for proc in self._processes:
@@ -281,10 +305,9 @@ class GameFaker:
                 except Exception:
                     pass
 
-        # 2. Delete all created files
-        for file_path in self._created_files:
+        for file_path in list(self._created_files) + list(self._shared_files):
             deleted = False
-            for attempt in range(5):
+            for _ in range(5):
                 try:
                     if file_path.exists():
                         file_path.unlink()
@@ -295,7 +318,6 @@ class GameFaker:
             if not deleted and file_path.exists():
                 print_color(f"[!] Failed to delete: {file_path} (file is locked)", Colors.YELLOW)
 
-        # 3. Clean up empty parent directories (deepest first)
         sorted_dirs = sorted(self._created_dirs, key=lambda p: len(p.parts), reverse=True)
         for dir_path in sorted_dirs:
             try:
@@ -338,4 +360,4 @@ def manual_mode(faker: GameFaker) -> None:
         print_color("\n[OK] Setup complete!", Colors.GREEN, bold=True)
         print_color("[!] IMPORTANT: Discord MUST be running for the spoofing to work", Colors.YELLOW)
 
-    input(f"\n{Colors.GRAY}Press Enter to continue...{Colors.RESET}")
+    pause()

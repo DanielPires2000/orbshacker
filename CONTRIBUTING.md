@@ -6,19 +6,29 @@ Thank you for your interest in contributing to this project! This document provi
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/DanielPires2000/orbshacker.git`
-3. Create a new branch: `git checkout -b feature/add-new-game-support`
-4. Make your changes
-5. Commit your changes: `git commit -m "Add support for new game detection"`
-6. Push to your fork: `git push origin feature/add-new-game-support`
-7. Open a Pull Request
+3. Install development dependencies: `pip install -r requirements-dev.txt`
+4. Copy the settings template: `copy settings.example.py settings.py`
+5. Create a new branch: `git checkout -b feature/add-new-game-support`
+6. Make your changes
+7. Run the checks: `python -m pytest` and `python -m ruff check .`
+8. Commit your changes: `git commit -m "Add support for new game detection"`
+9. Push to your fork: `git push origin feature/add-new-game-support`
+10. Open a Pull Request
 
 ## Code Style
 
-- Follow PEP 8 Python style guide
+- Follow PEP 8 Python style guide (enforced by `ruff check .`)
 - Use meaningful variable and function names
 - Add docstrings to functions and classes
 - Keep functions focused and single-purpose
 - Comment complex logic, but avoid obvious comments
+- Keep `orbshacker/timer.py`, `orbshacker/bake.py` and `orbshacker/janitor.py` stdlib-only (their source is inlined into faked scripts)
+
+## Tests
+
+- Add or update tests under `tests/` for every behavior change
+- Run the full suite with `python -m pytest`
+- Tests must not touch the network or the real Steam installation
 
 ## Commit Messages
 
@@ -29,11 +39,10 @@ Thank you for your interest in contributing to this project! This document provi
 
 ## Pull Request Process
 
-1. Ensure your code works correctly
+1. Ensure `python -m pytest` and `python -m ruff check .` pass
 2. Update documentation if needed
-3. Test on different platforms if possible
-4. Ensure no linter errors
-5. Write a clear PR description explaining your changes
+3. Test on Windows (the only supported platform)
+4. Write a clear PR description explaining your changes
 
 ## Reporting Issues
 

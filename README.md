@@ -3,7 +3,7 @@
 
 <br/>
 
-[![Python](https://img.shields.io/badge/Python-3.7+-3572A5?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.10+-3572A5?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20Only-555555?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/DanielPires2000/orbshacker)
 [![Discord](https://img.shields.io/badge/Discord-Game%20Spoofer-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com)
 [![License](https://img.shields.io/badge/License-GPL%20v3-c0392b?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](./LICENSE)
@@ -56,7 +56,7 @@ You search for the game by name directly inside the tool. The tool fetches the g
 
 **Self-Executing Timer & Embedded Config** builds faked game processes (renamed copies of the spoofer executable) that directly run the countdown timer when double-clicked by the user, with custom durations and auto-delete settings embedded directly inside the binary. No console windows are allocated for the faked processes.
 
-**Automatic Self-Destruction (`AUTO_DELETE`)** cleans up all faked executables, parent folders, and generated Steam manifests in the background once the countdown timer finishes.
+**Automatic Self-Destruction (`AUTO_DELETE_ON_TIMER_END`)** cleans up all faked executables, parent folders, and generated Steam manifests in the background once the countdown timer finishes. Set `AUTO_DELETE_ON_EXIT` as well if you also want the launcher to kill faked processes and delete their files when orbshacker closes.
 
 **Multi-Game Support** lets you run multiple fake processes simultaneously, completing all orb quests at once. Launch a game, press Enter, pick another, repeat. Each process runs independently and Discord sees all of them.
 
@@ -80,7 +80,7 @@ To detect this method, Discord would need kernel-level anti-cheat software compa
 
 ## Requirements
 
-Python 3.7 or higher, Windows only. Internet connection for database fetching. Discord must be running the spoofer only works when Discord is active and scanning processes.
+Python 3.10 or higher, Windows only. Internet connection for database fetching. Discord must be running the spoofer only works when Discord is active and scanning processes.
 
 <br/>
 
@@ -128,9 +128,9 @@ Launch the tool. Select your first game. After the process is launched, press En
 
 The tool connects to Discord's official API (`/api/v9/applications/detectable`) to get the live game list. It extracts the exact process name Discord expects for each game. It copies the spoofer executable (or base Python interpreter in source mode) to the configured folder (defaults to `Desktop/Win64/`), renames it to match the game's executable name, and bakes the active configuration directly inside it.
 
-When the faked game executable runs, it acts as a standalone countdown timer with its settings embedded. When the countdown completes, it automatically triggers a background self-destruction script (if `AUTO_DELETE` is enabled) to delete the faked files and empty parent directories.
+When the faked game executable runs, it acts as a standalone countdown timer with its settings embedded. When the countdown completes, it automatically triggers a background self-destruction script (if `AUTO_DELETE_ON_TIMER_END` is enabled) to delete the faked files and empty parent directories. The self-destruction script uses bounded retries and independent commands, so a locked file can never abort the rest of the cleanup.
 
-Steam Quest Mode adds a layer: it generates a fake `appmanifest_<appid>.acf` in `steamapps/` and places the executable in `steamapps/common/<game>/`, satisfying Discord's additional manifest check for games like Marathon or Toxic Commando.
+Steam Quest Mode adds a layer: it generates a fake `appmanifest_<appid>.acf` in `steamapps/` and places the executable in `steamapps/common/<game>/`, satisfying Discord's additional manifest check for games like Marathon or Toxic Commando. Both the manifest and the executable are checked before writing: files that were not created by orbshacker (i.e. a game you really have installed) are never overwritten.
 
 <br/>
 
@@ -140,35 +140,60 @@ Steam Quest Mode adds a layer: it generates a fake `appmanifest_<appid>.acf` in 
 orbshacker/
 ├── orbshacker.py          Main entry point
 ├── orbshacker/
-│   ├── __init__.py        Version and author metadata
+│   ├── __init__.py        Version and author metadata (lazy)
 │   ├── __main__.py        Package entry point, --timer-mode support
-│   ├── config.py          Centralized configuration with settings.py overrides
+│   ├── bake.py            Embedded-config markers for faked executables
+│   ├── config.py          Validated configuration with settings.py overrides
 │   ├── faker.py           Fake executable creation and launch logic
 │   ├── discord_db.py      Game database loading, search, and selection
+│   ├── janitor.py         Bounded, crash-safe self-deletion of faked artifacts
 │   ├── steam.py           Steam registry helpers and manifest generation
-│   ├── updater.py         Auto-update from GitHub releases
+│   ├── timer.py           Standalone countdown timer (also inlined into .pyw fakes)
+│   ├── updater.py         Auto-update from GitHub releases (SHA-256 verified)
 │   ├── net.py             HTTP helpers
 │   ├── ui.py              Terminal colors, animations, prompts
 │   └── errors.py          Custom exception hierarchy
 ├── tests/                 pytest coverage for pure helpers
-├── settings.py            User-editable configuration
-├── requirements.txt
+├── settings.example.py    Template for user-editable settings
+├── requirements.txt       Runtime dependencies
+├── requirements-dev.txt   Test/lint dependencies
+├── pyproject.toml         Project metadata and ruff configuration
 └── .github/
     └── workflows/
-        └── release.yml    PyInstaller build and GitHub Release automation
+        └── release.yml    Tests + PyInstaller build + GitHub Release automation
 ```
 
 <br/>
 
 ## Configuration
 
-User-editable values live in `settings.py` at the project root. The file is loaded at startup and overrides any default from `orbshacker/config.py`. Runtime preferences and API timeouts go there. The application version comes from the git tag used for the build and is not user-configurable; changing it manually would break update detection.
+Copy `settings.example.py` to `settings.py` and edit the values (frozen builds use `settings.json` next to the executable, created on first run). `settings.py` is git-ignored so your edits never dirty the repo. Every value is validated on load invalid types fall back to the defaults with a warning. Available keys:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `CHOSEN_FOLDER` | `Desktop` | Base folder for faked executables |
+| `FAKE_EXE_DIR` | `Win64` | Subfolder (inside `CHOSEN_FOLDER`) for faked executables |
+| `AUTO_DELETE_ON_TIMER_END` | `True` | Delete faked files when the countdown finishes |
+| `AUTO_DELETE_ON_EXIT` | `False` | Kill faked processes + delete files when the launcher exits |
+| `TIMER_MINUTES` | `15` | Countdown duration (1–1440) |
+
+The legacy `AUTO_DELETE` key is accepted and maps to `AUTO_DELETE_ON_TIMER_END`. The application version comes from the git tag used for the build and is not user-configurable; changing it manually would break update detection.
+
+<br/>
+
+## Development
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest        # run the test suite
+python -m ruff check .  # lint
+```
 
 <br/>
 
 ## Auto-updater
 
-When a new version tag is pushed, GitHub Actions builds a standalone Windows executable using PyInstaller and publishes it as a GitHub Release. The tool checks for updates on launch, downloads the new binary, swaps it in place, and restarts automatically. No Python installation needed to run the distributed executable.
+When a new version tag is pushed, GitHub Actions runs the tests, builds a standalone Windows executable using PyInstaller and publishes it as a GitHub Release together with a `SHA256SUMS` file. The tool checks for updates on launch, downloads the new binary, **verifies its SHA-256 checksum** against `SHA256SUMS` (unverified updates are refused), swaps it in place, and restarts automatically. No Python installation needed to run the distributed executable.
 
 <br/>
 

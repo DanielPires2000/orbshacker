@@ -3,14 +3,36 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'  # Triggers on tags like v2.1.0, v3.0.0, etc.
+      - 'v*.*.*'
 
 permissions:
   contents: write
 
 jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: python -m ruff check .
+
+      - name: Test
+        run: python -m pytest
+
   build:
     runs-on: windows-latest
+    needs: test
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
@@ -32,24 +54,37 @@ jobs:
         shell: bash
         run: |
           if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid tag format: ${GITHUB_REF_NAME}"
-            echo "Expected format: vX.Y.Z"
-            exit 1
+            echo "Tag ${GITHUB_REF_NAME} is not a stable release tag (expected vX.Y.Z) — skipping."
+            echo "valid=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
           echo "TAG_NAME=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          echo "valid=true" >> $GITHUB_OUTPUT
 
       - name: Write version metadata
+        if: steps.tag.outputs.valid == 'true'
         shell: bash
         run: |
           VERSION="${{ steps.tag.outputs.TAG_NAME }}"
           printf 'VERSION = "%s"\n' "${VERSION#v}" > orbshacker/_version.py
 
       - name: Build executable
+        if: steps.tag.outputs.valid == 'true'
         run: |
+          copy settings.example.py settings.py
           pyinstaller --onefile --name orbshacker --noconsole --add-data "settings.py;." --collect-all orbshacker orbshacker.py
 
+      - name: Generate SHA256SUMS
+        if: steps.tag.outputs.valid == 'true'
+        shell: bash
+        run: |
+          cd dist
+          sha256sum orbshacker.exe | sed 's/  */ /' > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Create GitHub Release
+        if: steps.tag.outputs.valid == 'true'
         uses: softprops/action-gh-release@v2.6.1
         with:
           tag_name: ${{ steps.tag.outputs.TAG_NAME }}
@@ -60,8 +95,12 @@ jobs:
             ### Download
             Download `orbshacker.exe` below and run it. No Python required!
             
+            `SHA256SUMS` contains the checksum the app verifies before self-updating.
+            
             ### What's new
             See the [commit log](https://github.com/${{ github.repository }}/commits/${{ steps.tag.outputs.TAG_NAME }}) for details.
-          files: dist/orbshacker.exe
+          files: |
+            dist/orbshacker.exe
+            dist/SHA256SUMS
           draft: false
           prerelease: false

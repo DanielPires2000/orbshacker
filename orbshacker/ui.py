@@ -2,10 +2,31 @@
 ui.py – Terminal UI helpers: colors, banners, animations, menus, credits.
 """
 
+import os
 import sys
 import time
 
 from . import config
+
+_vt_enabled = False
+
+
+def enable_vt() -> None:
+    """Enable ANSI/VT escape processing on legacy Windows consoles."""
+    global _vt_enabled
+    if _vt_enabled:
+        return
+    _vt_enabled = True
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.GetStdHandle(-11)
+            mode = ctypes.c_uint32()
+            if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+                kernel32.SetConsoleMode(handle, mode.value | 0x0004)
+        except Exception:
+            os.system("")
 
 
 class Colors:
@@ -23,15 +44,27 @@ class Colors:
 
 def print_color(text: str, color: str = Colors.WHITE, bold: bool = False) -> None:
     """Print colored text."""
+    enable_vt()
     style = Colors.BOLD if bold else ''
     print(f"{style}{color}{text}{Colors.RESET}")
 
 
+def pause(prompt: str = "Press Enter to continue...") -> None:
+    """Wait for Enter; Ctrl+C/EOF return to the caller instead of killing the app."""
+    try:
+        input(f"\n{Colors.GRAY}{prompt}{Colors.RESET}")
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+
 def print_boxed_title(title: str, width: int = 50, color: str = Colors.CYAN) -> None:
     """Print a boxed title with ASCII borders."""
-    border = f"{Colors.BOLD}{color}{'+' + '-' * (width - 2) + '+'}{Colors.RESET}"
-    title_padding = (width - len(title) - 4) // 2
-    extra_space = (width - len(title) - 4) % 2
+    enable_vt()
+    inner = max(1, width - 2)
+    title = title[: inner - 2]
+    border = f"{Colors.BOLD}{color}{'+' + '-' * inner + '+'}{Colors.RESET}"
+    title_padding = max(0, (width - len(title) - 4) // 2)
+    extra_space = max(0, (width - len(title) - 4) % 2)
     title_line = (
         f"{Colors.BOLD}{color}|{Colors.RESET}"
         f"{' ' * title_padding}{Colors.BOLD}{title}{Colors.RESET}"
@@ -121,7 +154,7 @@ def show_credits() -> None:
     {Colors.BOLD}How it works (Game Spoofing):{Colors.RESET}
     1. Connects to Discord's official API to get the latest game list
     2. Finds the exact process name Discord expects for each game
-    3. Copies exe.exe to Desktop/Win64/ and renames it to match
+    3. Copies a base executable to Desktop/Win64/ and renames it to match
     4. Launches the fake process in background
     5. Discord scans running processes and detects the fake process name
     6. Discord thinks you're playing the game (process name match)
@@ -146,7 +179,7 @@ def show_credits() -> None:
     • The fake process must stay running for Discord to detect it
     
     {Colors.BOLD}{Colors.GREEN}Multi-Game Emulation:{Colors.RESET}
-    • Run this tool multiple times to emulate multiple games at once
+    • Launch several games from the menu in one session
     • Complete ALL orb quests simultaneously in just 15 minutes
     
     {Colors.BOLD}{Colors.RED}WARNING - EDUCATIONAL PURPOSES ONLY{Colors.RESET}
@@ -155,7 +188,6 @@ def show_credits() -> None:
     • Use at your own risk
     
     {Colors.GRAY}Made by {config.DEVELOPER}{Colors.RESET}
-    {Colors.GRAY}Press Enter to return to menu...{Colors.RESET}
 """
     print(credits_text)
-    input()
+    pause("Press Enter to return to menu...")

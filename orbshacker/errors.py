@@ -19,3 +19,7 @@ class SteamNotFoundError(OrbshackerError):
 
 class DatabaseLoadError(OrbshackerError):
     """Failed to load the games database from any source."""
+
+
+class FileConflictError(OrbshackerError):
+    """A target file already exists and was not created by orbshacker."""

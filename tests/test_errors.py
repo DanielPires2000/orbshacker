@@ -1,11 +1,12 @@
 """Tests for errors.py – exception hierarchy."""
 
 import pytest
+
 from orbshacker.errors import (
-    OrbshackerError,
-    NetworkError,
-    SteamNotFoundError,
     DatabaseLoadError,
+    NetworkError,
+    OrbshackerError,
+    SteamNotFoundError,
 )
 
 

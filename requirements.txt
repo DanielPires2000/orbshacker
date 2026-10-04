@@ -1,3 +1,2 @@
 requests>=2.31.0
 packaging>=23.0
-pytest>=8.0.0
