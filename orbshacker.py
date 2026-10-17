@@ -39,7 +39,7 @@ def show_console() -> None:
                 # Try to attach to parent console first
                 attached = ctypes.windll.kernel32.AttachConsole(-1)
                 allocated = False if attached else bool(ctypes.windll.kernel32.AllocConsole())
-                
+
                 # Reopen standard streams only if console attachment or allocation succeeded
                 if attached or allocated:
                     sys.stdout = open("CONOUT$", "w", encoding="utf-8")
